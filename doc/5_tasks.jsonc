@@ -1,0 +1,147 @@
+// ============================================================================
+// 5. tasks — 任務與時段（每位使用者的資料列）
+//    對應模組圖：#1 AI 學習任務拆解、#3 排程表、動態調整 #1 完成紀錄與學習回饋
+//    任務的「內容」（AI 拆解）與「狀態」（執行回饋）是一對一，放在同一筆
+//
+//    分成兩張表：
+//      (A) tasks(task_id PK, user_id, plan_id, course_key, assessment_id, status, deadline, data JSON)
+//          一個任務一筆：做什麼、要多久、多重要、為什麼 + 做得怎樣
+//      (B) schedule_blocks(block_id PK, task_id, user_id, date, start_time, end_time, locked, status)
+//          一個時段一筆：排在何時 + 有沒有做；全部用一般欄位，週視圖、ICS 匯出依日期查詢
+//          一個 task 可分成多段，每段 ≤ session_minutes
+//
+//    回報完成後會：
+//      (1) 用 actual_minutes / estimated_minutes 更新 3_user_state 的 speed
+//      (2) 用 understanding 更新 chapter_mastery
+//      (3) need_review 或理解度低 → 下次排程加排 auto_review 任務
+//      (4) 判斷是否需要重排 → 可能產生新的 4_schedule（trigger = completion_feedback）
+// ============================================================================
+{
+  // --------------------------------------------------------------------------
+  // (A) tasks
+  // --------------------------------------------------------------------------
+  "tasks": [
+    {
+      "schema_version": "1.5",
+      "task_id": "t_0042",
+      "user_id": "u_0001",
+      "plan_id": "p_0006",               // 最後一次排到這個任務的 schedule
+      "course_key": "115-1_CE3005",
+      // 指向本人 2_course 的 assessments.id；一般進度可為 null
+      "assessment_id": "midterm",
+
+      // ---- 任務內容（AI 拆解；重排時可能被更新） ----
+
+      // 任務類型（固定清單，影響估時倍率與 speed.by_task_type）：
+      //   reading 閱讀 | notes 整理筆記 | examples 例題 | past_exam 歷屆試題
+      //   mock_exam 模擬考 | error_review 錯題檢討 | final_review 考前總複習
+      //   homework 寫作業 | review 複習
+      "type": "past_exam",
+      // 階段：learn 學新進度 | practice 練習 | sprint 考前衝刺（exam_buffer_days 內）
+      "phase": "sprint",
+      "title": "計網 期中歷屆試題",
+      "chapters": ["Ch2", "Ch3"],
+
+      // 時間估算由程式計算（不交給 LLM），保留明細以便回推 speed
+      // minutes = base_minutes × difficulty_mult × familiarity_mult × speed_factor（四捨五入到 5 分）
+      "estimate": { "base_minutes": 60, "difficulty_mult": 1.2, "familiarity_mult": 1.1, "speed_factor": 1.15, "minutes": 90 },
+
+      "deadline": "2026-11-04",          // 最晚完成日（通常 = 評量日 − 1 或作業截止日）
+      "priority": 0.82,                  // 0–1；由占比、剩餘天數、熟悉度算出
+      "reason": "期中考剩 3 天、占比 30%，Ch3 熟悉度低",
+      "source": "ai",                    // ai | user（手動新增）| auto_review（理解度低自動加排）
+      "parent_task_id": null,            // auto_review 指向原任務
+
+      // ---- 任務狀態（執行回饋） ----
+
+      // pending 已產生未排 | scheduled 已排進時段 | done 完成 | skipped 使用者略過
+      // missed 時段過了未回報 | superseded 被新版 schedule 取消
+      "status": "done",
+
+      // 完成回饋；可整個任務回報一次（block_id = null），也可逐段回報
+      "completions": [
+        {
+          "block_id": null,
+          "completed_at": "2026-11-02T20:35:00+08:00",
+          "on_time": true,               // 是否在 deadline 前完成
+          // 回報當下的預估時間快照：estimate 之後被重排改掉，speed 仍用這個值計算
+          "estimated_minutes": 90,
+          "actual_minutes": 115,
+          "difficulty": 4,               // 1–5 做完後的主觀難度
+          // 各章節理解程度 1–5；只有一個總分時可用 { "_all": 2 }
+          "understanding": { "Ch2": 3, "Ch3": 2 },
+          "need_review": true,           // 使用者自己勾「需要再複習」
+          "comment": "TCP 壅塞控制那幾題完全不會"
+        }
+      ],
+
+      "created_at": "2026-10-28T20:00:00+08:00",
+      "updated_at": "2026-11-02T20:35:00+08:00"
+    },
+    {
+      "schema_version": "1.5",
+      "task_id": "t_0051",
+      "user_id": "u_0001",
+      "plan_id": "p_0007",
+      "course_key": "115-1_CE3005",
+      "assessment_id": "final",
+      "type": "review",
+      "phase": "practice",
+      "title": "Ch3 TCP 壅塞控制複習",
+      "chapters": ["Ch3"],
+      // familiarity_mult 依 chapter_mastery（Ch3 = 2）；review 類型樣本不足 → 用 default speed 1.15
+      "estimate": { "base_minutes": 45, "difficulty_mult": 1.2, "familiarity_mult": 1.2, "speed_factor": 1.15, "minutes": 75 },
+      "deadline": "2026-11-20",
+      "priority": 0.64,
+      "reason": "t_0042 回報 Ch3 理解程度 2/5，標記需複習",
+      "source": "auto_review",
+      "parent_task_id": "t_0042",
+      "status": "scheduled",
+      "completions": [],
+      "created_at": "2026-11-13T21:00:00+08:00",
+      "updated_at": "2026-11-13T21:00:00+08:00"
+    },
+    {
+      "schema_version": "1.5",
+      "task_id": "t_0052",
+      "user_id": "u_0001",
+      "plan_id": "p_0007",
+      "course_key": "115-1_CE3005",
+      "assessment_id": "final",
+      "type": "reading",
+      "phase": "learn",
+      "title": "Ch4 Data Plane 閱讀",
+      "chapters": ["Ch4"],
+      // Ch4 無 mastery 資料 → 用整門課 familiarity 2；reading 樣本足 → speed 1.05
+      "estimate": { "base_minutes": 60, "difficulty_mult": 1.2, "familiarity_mult": 1.2, "speed_factor": 1.05, "minutes": 90 },
+      "deadline": "2026-11-27",
+      "priority": 0.55,
+      "reason": "第 10 週已教完 Ch4，期末範圍",
+      "source": "ai",
+      "parent_task_id": null,
+      "status": "scheduled",
+      "completions": [],
+      "created_at": "2026-11-13T21:00:00+08:00",
+      "updated_at": "2026-11-13T21:00:00+08:00"
+    }
+  ],
+
+  // --------------------------------------------------------------------------
+  // (B) schedule_blocks
+  //     status：planned | done | missed | cancelled
+  //     locked = true：使用者手動拖過，重排時不移動
+  // --------------------------------------------------------------------------
+  "schedule_blocks": [
+    // t_0042 共 90 分 → 50 + 40，中間休息 10 分
+    { "block_id": "b_0101", "task_id": "t_0042", "user_id": "u_0001", "date": "2026-11-02", "start_time": "19:00", "end_time": "19:50", "locked": false, "status": "done" },
+    { "block_id": "b_0102", "task_id": "t_0042", "user_id": "u_0001", "date": "2026-11-02", "start_time": "20:00", "end_time": "20:40", "locked": false, "status": "done" },
+
+    // t_0051 共 75 分 → 50 + 25；11-14 被 date_override 清空，所以排 11-15（日）、11-16（一）
+    { "block_id": "b_0130", "task_id": "t_0051", "user_id": "u_0001", "date": "2026-11-15", "start_time": "14:00", "end_time": "14:50", "locked": false, "status": "planned" },
+    { "block_id": "b_0131", "task_id": "t_0051", "user_id": "u_0001", "date": "2026-11-16", "start_time": "19:00", "end_time": "19:25", "locked": true,  "status": "planned" },
+
+    // t_0052 共 90 分 → 50 + 40
+    { "block_id": "b_0132", "task_id": "t_0052", "user_id": "u_0001", "date": "2026-11-17", "start_time": "19:00", "end_time": "19:50", "locked": false, "status": "planned" },
+    { "block_id": "b_0133", "task_id": "t_0052", "user_id": "u_0001", "date": "2026-11-17", "start_time": "20:00", "end_time": "20:40", "locked": false, "status": "planned" }
+  ]
+}

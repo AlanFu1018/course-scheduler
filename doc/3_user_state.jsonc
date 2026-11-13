@@ -1,0 +1,123 @@
+// ============================================================================
+// 3. user_state — 使用者參數（每位使用者一份）
+//    對應模組圖：#1 初始學習狀況設定 / ⑤ 學習狀況設定
+//    是排程的「輸入」；改動後由「是否需要重新排程」判斷要不要產生新的 schedule
+//
+//    可排時段的計算（排程時由程式算，不存）：
+//      可排時段 = availability.weekly_slots   使用者「想讀書」的時間（意願）
+//               − calendar_events             匯入的 ICS 行程（有事的時間）
+//               − 2_course.course.sessions    上課時間
+//               ± date_overrides              手動補充（行事曆沒記的例外）
+//      再套用 daily_max_minutes、session_minutes、break_minutes、exam_buffer_days 切成時段
+//
+//    ICS 有兩個方向，不要混淆：
+//      匯入：calendar_sources → 避開使用者已有的行程（本檔）
+//      匯出：schedule_blocks → 產生讀書計畫的 ICS 給使用者訂閱（5_tasks）
+//
+//    分成兩種紀錄：
+//      (A) users(user_id PK, data JSON)
+//          個人層級：可用時間、外部行事曆來源、單日覆寫
+//      (B) user_courses(user_id, course_key, data JSON, PK(user_id, course_key))
+//          每人 × 每門課的主觀狀態：熟悉度、難度、目標、速度、章節掌握度
+//          以 (user_id, course_key) 對應 2_course
+// ============================================================================
+{
+  // --------------------------------------------------------------------------
+  // (A) users
+  // --------------------------------------------------------------------------
+  "user": {
+    "schema_version": "1.5",
+    "user_id": "u_0001",
+    "timezone": "Asia/Taipei",
+
+    // 可用時間規則；可多條，各自帶日期範圍（例如學期中 / 寒假各一條）
+    // 同一天只套用一條：取 valid_from ≤ 日期 ≤ valid_to 的那條，重疊時取 valid_from 較晚者
+    "availability": [
+      {
+        "valid_from": "2026-09-07",
+        "valid_to": "2026-12-25",
+
+        // 每週「願意讀書」的時間段；任務只排進這些時段，不在時段內就不排
+        // ICS 只知道「有事」，不知道「想不想讀」（睡覺、吃飯、休息通常不在行事曆上），所以這欄不能省
+        // 初次設定時可分析 ICS 常空的時段自動建議一組，使用者確認／微調
+        // （平日／假日的差異直接用不同 weekday 的時段表達）
+        "weekly_slots": [
+          { "weekday": 1, "start_time": "19:00", "end_time": "22:00" },
+          { "weekday": 2, "start_time": "19:00", "end_time": "22:00" },
+          { "weekday": 3, "start_time": "19:00", "end_time": "22:00" },
+          { "weekday": 4, "start_time": "19:00", "end_time": "22:00" },
+          { "weekday": 6, "start_time": "14:00", "end_time": "18:00" },
+          { "weekday": 7, "start_time": "14:00", "end_time": "18:00" }
+        ],
+
+        "daily_max_minutes": 180,  // 單日排程上限（時段再多也不超過）
+        "session_minutes": 50,     // 單次讀書長度；超過的任務切成多個時段
+        "break_minutes": 10,       // 兩個時段之間的休息
+        "exam_buffer_days": 3      // 考前預留天數：考前 N 天只排複習／歷屆，不排新進度
+      }
+    ],
+
+    // 外部行事曆（匯入）；事件同步到 calendar_events 表當快取，不寫進本檔
+    // calendar_events(event_id PK, user_id, source_id, start_at, end_at, all_day, uid, synced_at)
+    "calendar_sources": [
+      {
+        "source_id": "cal_01",
+        "type": "ics_url",               // ics_url（訂閱連結，定期同步）| ics_file（一次上傳，不會更新）
+        "name": "Google 行事曆",
+        "url": "https://calendar.google.com/.../basic.ics",   // 私密連結，視同密碼保存，不回傳前端明文
+        "treat_as": "busy",              // busy：所有事件都視為沒空 | ignore：暫時停用
+        "sync_interval_minutes": 60,
+        "last_synced_at": "2026-11-13T20:00:00+08:00",
+        "last_sync_status": "ok"         // ok | error（連結失效時提示使用者）
+      }
+    ],
+    // 行事曆有變動且影響到已排時段 → 觸發重排（4_schedule 的 trigger = calendar_update）
+
+    // 單日覆寫（手動補充）：行事曆沒記的例外才用；整天取代當日時段，slots: [] = 整天沒空
+    "date_overrides": [
+      { "date": "2026-11-14", "slots": [], "note": "臨時想休息一天（行事曆上沒有）" },
+      { "date": "2026-11-21", "slots": [ { "start_time": "09:00", "end_time": "12:00" } ], "note": null }
+    ],
+
+    "created_at": "2026-09-05T20:00:00+08:00",
+    "updated_at": "2026-11-12T22:30:00+08:00"
+  },
+
+  // --------------------------------------------------------------------------
+  // (B) user_courses：每門有修／在自學的課一筆
+  // --------------------------------------------------------------------------
+  "user_courses": [
+    {
+      "schema_version": "1.5",
+      "user_id": "u_0001",
+      "course_key": "115-1_CE3005",
+      "active": true,                    // false = 退選／暫停，排程時略過
+
+      // 初始主觀設定，1–5 整數；換算成倍率的表寫在程式裡
+      "familiarity": 2,                  // 整門課熟悉度；章節沒有 mastery 資料時才用這個
+      "difficulty": 4,                   // 主觀難度
+      "target_grade": 85,                // 目標成績；影響 priority 與複習量
+
+      // 個人速度修正；依 actual_minutes / estimate.minutes 自動更新（例如指數移動平均）
+      // default 為整體值；by_task_type 樣本數夠多時（例如 ≥ 3）才覆蓋 default
+      "speed": {
+        "default": { "factor": 1.15, "samples": 6 },
+        "by_task_type": {
+          "reading":   { "factor": 1.05, "samples": 3 },
+          "past_exam": { "factor": 1.30, "samples": 2 }
+        }
+      },
+
+      // 章節掌握度：由 5_tasks 的完成回饋 understanding 自動更新
+      // level 1–5；need_review = true 時下次排程加排 auto_review 任務
+      "chapter_mastery": {
+        "Ch1": { "level": 4, "need_review": false, "updated_at": "2026-10-20T21:40:00+08:00" },
+        "Ch2": { "level": 3, "need_review": false, "updated_at": "2026-11-02T20:35:00+08:00" },
+        "Ch3": { "level": 2, "need_review": true,  "updated_at": "2026-11-02T20:35:00+08:00" }
+      },
+
+      "created_at": "2026-09-05T20:10:00+08:00",
+      "updated_at": "2026-11-02T20:35:00+08:00"
+    }
+  ]
+}

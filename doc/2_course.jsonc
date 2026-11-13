@@ -1,0 +1,117 @@
+// ============================================================================
+// 2. course — 個人課程資訊（每位使用者各自的資料列）
+//    對應模組圖：#3 人工審核／使用者編輯 → 課程資訊 Database
+//    SQLite：courses(user_id, course_key, analysis_id, data JSON, PK(user_id, course_key))
+//
+//    - 使用者在審核畫面確認（可順便修改）1_syllabus_analysis 之後，才複製出這一份
+//      → 這筆紀錄存在，就代表本人已審核，不需要另外的 review 欄位
+//    - 之後本人可直接編輯；改過的欄位 status 改成 user_supplied
+//    - 自學課程：沒有 analysis，由使用者直接建立（source.type = user_created、analysis_id = null）
+//    - 結構與 1_syllabus_analysis 相同，多了 user_id，少了 model
+//    - 修改評量日期／範圍 → 觸發重排（4_schedule 的 trigger = course_update）
+//    - 通用規則（weekday、日期格式、{ value, status, evidence }）見 1_syllabus_analysis 檔頭
+// ============================================================================
+{
+  "schema_version": "1.5",
+
+  // PK = (user_id, course_key)；審核與編輯都只影響本人這份
+  "user_id": "u_0001",
+
+  // 校內課程：{學年-學期}_{課號}，與 analysis 相同；自學課程：self_{slug}
+  "course_key": "115-1_CE3005",
+
+  "source": {
+    "type": "ncu_syllabus",                       // ncu_syllabus | manual_upload | user_created
+    "analysis_id": "sa_0003",                     // 從哪份共用分析複製；user_created 為 null
+    "syllabus_url": "https://cis.ncu.edu.tw/...",
+    // 複製當時的課綱 hash；與該 course_key 最新 analysis 的 hash 不同 → 前端提示「課綱已更新，要比對嗎？」
+    "raw_text_hash": "sha256:..."
+  },
+
+  // 課程有效期間；使用者資料不以學期切分，靠這個範圍判斷「目前有效」
+  // 週次以 start_date 所在週為第 1 週（start_date 應為週一）
+  "start_date": "2026-09-07",
+  "end_date": "2026-12-25",
+
+  "course": {
+    "code": "CE3005",
+    "name": "計算機網路",
+    "name_en": "Computer Networks",
+    "instructor": "王小明",
+    "credits": 3,
+
+    // 上課時段；前端選可用時間時這些格子標灰，排程時也會扣掉
+    "sessions": [
+      { "weekday": 4, "start_time": "10:00", "end_time": "11:50", "room": "E6-A203" }
+    ],
+
+    "textbook": {
+      "title": "Computer Networking: A Top-Down Approach",
+      "authors": ["Kurose", "Ross"],
+      "edition": 8,
+      // 章節清單；assessments.scope、tasks.chapters、chapter_mastery 都只能引用這裡的 id
+      "chapters": [
+        { "id": "Ch1", "title": "Computer Networks and the Internet" },
+        { "id": "Ch2", "title": "Application Layer" },
+        { "id": "Ch3", "title": "Transport Layer" },
+        { "id": "Ch4", "title": "The Network Layer: Data Plane" },
+        { "id": "Ch5", "title": "The Network Layer: Control Plane" }
+      ]
+    }
+  },
+
+  // 配分類別；所有 category 的 weight.value 加總必須 = 100
+  "grading": [
+    { "category": "exam",     "weight": { "value": 60, "status": "confirmed", "evidence": "期中 30%、期末 30%" } },
+    { "category": "homework", "weight": { "value": 30, "status": "confirmed", "evidence": "作業 30%" } },
+    { "category": "quiz",     "weight": { "value": 10, "status": "confirmed", "evidence": "小考 10%" } }
+  ],
+
+  // 各項評量；type 可自由擴充：exam | homework | presentation | quiz | project | goal …
+  // id 在同一門課內唯一；tasks.assessment_id 指向這裡
+  "assessments": [
+    {
+      "id": "midterm",
+      "type": "exam",
+      "title": "期中考",
+      "weight": { "value": 30, "status": "confirmed", "evidence": "期中考 30%" },
+      // 本人確認了 AI 推測的日期 → 改成 user_supplied
+      // date.week 必須與 start_date 推算的週次一致（2026-11-05 為第 9 週週四）
+      "date":   { "value": "2026-11-05", "week": 9, "status": "user_supplied", "evidence": "老師上課公告" },
+      // scope 內章節必須存在於 textbook.chapters
+      "scope":  { "value": ["Ch1", "Ch2", "Ch3"], "status": "confirmed", "evidence": "第 1–8 週進度" },
+      "note": null
+    },
+    {
+      "id": "final",
+      "type": "exam",
+      "title": "期末考",
+      "weight": { "value": 30, "status": "confirmed", "evidence": "期末考 30%" },
+      // 仍是 AI 推測 → 前端以黃色標示，提醒使用者確認
+      "date":   { "value": "2026-12-24", "week": 16, "status": "estimated", "evidence": "課綱寫第 16 週，依週四上課日推算" },
+      "scope":  { "value": ["Ch4", "Ch5"], "status": "estimated", "evidence": "期中後進度，課綱未明寫是否考前半" },
+      "note": null
+    },
+    {
+      "id": "hw-1",
+      "type": "homework",
+      "title": "作業一：Socket Programming",
+      // value = null → 由 grading 中 homework 的 30% 平均分給所有 homework
+      "weight": { "value": null, "status": "estimated", "evidence": "課綱未列單次作業占比，平均分配" },
+      // 本人修改：AI 推測 10-15，助教延後到 10-17
+      "date":   { "value": "2026-10-17", "week": 6, "status": "user_supplied", "evidence": "助教延後兩天（eeclass 公告）" },
+      "scope":  { "value": ["Ch2"], "status": "confirmed", "evidence": "課綱：作業一 Application Layer" },
+      "note": "要用 Python 寫"
+    }
+  ],
+
+  // 每週進度；拆任務時用來判斷「某章節何時教完、何時才能開始讀」
+  "weekly_schedule": [
+    { "week": 1, "date_range": ["2026-09-07", "2026-09-13"], "topics": ["Ch1 Introduction"], "chapters": ["Ch1"], "status": "confirmed" },
+    { "week": 2, "date_range": ["2026-09-14", "2026-09-20"], "topics": ["Ch1 Delay, Loss, Throughput"], "chapters": ["Ch1"], "status": "confirmed" }
+    // … 其餘週次
+  ],
+
+  "created_at": "2026-11-10T09:12:00+08:00",     // 本人確認的時間
+  "updated_at": "2026-11-12T18:00:00+08:00"
+}
