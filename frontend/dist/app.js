@@ -267,8 +267,17 @@ function coursePreference(sectionId) {
   };
 }
 
-function preferenceOptions(options, selected) {
-  return options.map(([value, label]) => `<option value="${value}" ${String(selected) === String(value) ? "selected" : ""}>${label}</option>`).join("");
+function preferenceDropdown(sectionId, field, id, options, selected) {
+  const selectedOption = options.find(([value]) => String(value) === String(selected)) || options[0];
+  return `<div class="custom-select" data-custom-select>
+    <input type="hidden" data-preference="${field}" data-section-id="${sectionId}" value="${selectedOption[0]}" />
+    <button id="${id}" class="custom-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+      <span data-select-label>${selectedOption[1]}</span><span class="custom-select-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="custom-select-menu" role="listbox" aria-labelledby="${id}" hidden>
+      ${options.map(([value, label]) => `<button class="custom-select-option${String(selectedOption[0]) === String(value) ? " selected" : ""}" type="button" role="option" aria-selected="${String(selectedOption[0]) === String(value)}" data-select-value="${value}">${label}</button>`).join("")}
+    </div>
+  </div>`;
 }
 
 function courseResults(query = "") {
@@ -319,11 +328,11 @@ function coursePreferenceCard(section) {
   return `<article class="preference-card">
     <div class="preference-card-head"><div><div class="row preference-title"><span class="course-category ${section.category}">${section.category === "required" ? "必修" : "通識"}</span><h2>${section.name}</h2></div><p>${section.code}・${section.teacher}</p></div><span class="status confirmed">已排入課表</span></div>
     <div class="preference-grid">
-      <div class="field"><label for="${section.id}-familiarity">熟悉度</label><select id="${section.id}-familiarity" data-preference="familiarity" data-section-id="${section.id}">${preferenceOptions([["不熟悉","不熟悉"],["普通","普通"],["熟悉","熟悉"]], preference.familiarity)}</select></div>
-      <div class="field"><label for="${section.id}-difficulty">課程難度</label><select id="${section.id}-difficulty" data-preference="difficulty" data-section-id="${section.id}">${preferenceOptions([["簡單","簡單"],["普通","普通"],["困難","困難"],["非常困難","非常困難"]], preference.difficulty)}</select></div>
+      <div class="field"><label for="${section.id}-familiarity">熟悉度</label>${preferenceDropdown(section.id, "familiarity", `${section.id}-familiarity`, [["不熟悉","不熟悉"],["普通","普通"],["熟悉","熟悉"]], preference.familiarity)}</div>
+      <div class="field"><label for="${section.id}-difficulty">課程難度</label>${preferenceDropdown(section.id, "difficulty", `${section.id}-difficulty`, [["簡單","簡單"],["普通","普通"],["困難","困難"],["非常困難","非常困難"]], preference.difficulty)}</div>
       <div class="field"><label for="${section.id}-target-score">目標成績</label><div class="input-unit"><input id="${section.id}-target-score" data-preference="targetScore" data-section-id="${section.id}" type="number" inputmode="numeric" min="60" max="100" value="${preference.targetScore}" /><span>分</span></div></div>
-      <div class="field"><label for="${section.id}-session">單次讀書長度</label><select id="${section.id}-session" data-preference="sessionMinutes" data-section-id="${section.id}">${preferenceOptions([["25","25 分鐘"],["45","45 分鐘"],["60","60 分鐘"],["90","90 分鐘"]], preference.sessionMinutes)}</select></div>
-      <div class="field"><label for="${section.id}-daily-limit">單日安排上限</label><select id="${section.id}-daily-limit" data-preference="dailyLimitMinutes" data-section-id="${section.id}">${preferenceOptions([["60","1 小時"],["90","1.5 小時"],["120","2 小時"],["180","3 小時"]], preference.dailyLimitMinutes)}</select></div>
+      <div class="field"><label for="${section.id}-session">單次讀書長度</label>${preferenceDropdown(section.id, "sessionMinutes", `${section.id}-session`, [["25","25 分鐘"],["45","45 分鐘"],["60","60 分鐘"],["90","90 分鐘"]], preference.sessionMinutes)}</div>
+      <div class="field"><label for="${section.id}-daily-limit">單日安排上限</label>${preferenceDropdown(section.id, "dailyLimitMinutes", `${section.id}-daily-limit`, [["60","1 小時"],["90","1.5 小時"],["120","2 小時"],["180","3 小時"]], preference.dailyLimitMinutes)}</div>
       <div class="field"><label for="${section.id}-buffer">考前預留天數</label><div class="input-unit"><input id="${section.id}-buffer" data-preference="bufferDays" data-section-id="${section.id}" type="number" inputmode="numeric" min="1" max="30" value="${preference.bufferDays}" /><span>天</span></div></div>
     </div>
   </article>`;
@@ -556,6 +565,46 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const customOption = event.target.closest("[data-select-value]");
+  if (customOption) {
+    const customSelect = customOption.closest("[data-custom-select]");
+    const input = customSelect?.querySelector("input[data-preference]");
+    if (!customSelect || !input) return;
+    input.value = customOption.dataset.selectValue;
+    customSelect.querySelector("[data-select-label]").textContent = customOption.textContent.trim();
+    customSelect.querySelectorAll("[data-select-value]").forEach(option => {
+      const selected = option === customOption;
+      option.classList.toggle("selected", selected);
+      option.setAttribute("aria-selected", String(selected));
+    });
+    const menu = customSelect.querySelector(".custom-select-menu");
+    const trigger = customSelect.querySelector(".custom-select-trigger");
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    updateCoursePreference(input);
+    trigger.focus();
+    return;
+  }
+  const customTrigger = event.target.closest(".custom-select-trigger");
+  if (customTrigger) {
+    const customSelect = customTrigger.closest("[data-custom-select]");
+    const menu = customSelect.querySelector(".custom-select-menu");
+    const willOpen = menu.hidden;
+    document.querySelectorAll(".custom-select-menu:not([hidden])").forEach(openMenu => {
+      openMenu.hidden = true;
+      openMenu.closest("[data-custom-select]")?.querySelector(".custom-select-trigger")?.setAttribute("aria-expanded", "false");
+    });
+    menu.hidden = !willOpen;
+    customTrigger.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) menu.querySelector(".selected")?.focus();
+    return;
+  }
+  if (!event.target.closest("[data-custom-select]")) {
+    document.querySelectorAll(".custom-select-menu:not([hidden])").forEach(menu => {
+      menu.hidden = true;
+      menu.closest("[data-custom-select]")?.querySelector(".custom-select-trigger")?.setAttribute("aria-expanded", "false");
+    });
+  }
   const viewModeButton = event.target.closest("[data-view-mode]");
   if (viewModeButton) {
     viewPreference = viewModeButton.dataset.viewMode;
@@ -668,6 +717,33 @@ document.addEventListener("click", (event) => {
     "reset-demo": () => { localStorage.removeItem(STORAGE_KEY); state = structuredClone(defaultState); render(); },
   };
   actions[action]?.();
+});
+
+document.addEventListener("keydown", (event) => {
+  const customSelect = event.target.closest?.("[data-custom-select]");
+  if (!customSelect) return;
+  const menu = customSelect.querySelector(".custom-select-menu");
+  const trigger = customSelect.querySelector(".custom-select-trigger");
+  const options = [...customSelect.querySelectorAll("[data-select-value]")];
+  if (event.key === "Escape") {
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.focus();
+    event.preventDefault();
+    return;
+  }
+  if (event.target === trigger && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    menu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    (menu.querySelector(".selected") || options[0])?.focus();
+    event.preventDefault();
+    return;
+  }
+  if (!event.target.matches?.("[data-select-value]") || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+  const currentIndex = options.indexOf(event.target);
+  const direction = event.key === "ArrowDown" ? 1 : -1;
+  options[(currentIndex + direction + options.length) % options.length]?.focus();
+  event.preventDefault();
 });
 
 if ("serviceWorker" in navigator) {
