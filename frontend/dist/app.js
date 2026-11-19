@@ -78,6 +78,9 @@ const defaultState = {
   activeCell: "",
   pendingSectionId: "",
   coursePreferences: {},
+  courseSupplements: {},
+  supplementCourseId: "",
+  supplementUploadError: "",
   course: {
     name: "資料結構",
     teacher: "王老師",
@@ -124,6 +127,12 @@ function setState(patch) {
   state = { ...state, ...patch };
   save();
   render();
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;",
+  })[character]);
 }
 
 function viewSwitcher() {
@@ -280,6 +289,49 @@ function preferenceDropdown(sectionId, field, id, options, selected) {
   </div>`;
 }
 
+function supplementCourseDropdown(sections, selectedId) {
+  const selected = sections.find(section => section.id === selectedId) || sections[0];
+  if (!selected) return "";
+  return `<div class="custom-select supplement-course-select" data-custom-select>
+    <button id="supplement-course" class="custom-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+      <span data-select-label>${selected.name}・${selected.teacher}</span><span class="custom-select-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="custom-select-menu" role="listbox" aria-labelledby="supplement-course" hidden>
+      ${sections.map(section => `<button class="custom-select-option${section.id === selected.id ? " selected" : ""}" type="button" role="option" aria-selected="${section.id === selected.id}" data-supplement-course-id="${section.id}"><strong>${section.name}</strong><span>${section.code}・${section.teacher}</span></button>`).join("")}
+    </div>
+  </div>`;
+}
+
+function courseSupplementSection(sections) {
+  if (!sections.length) return "";
+  const selectedId = sections.some(section => section.id === state.supplementCourseId)
+    ? state.supplementCourseId
+    : sections[0].id;
+  state.supplementCourseId = selectedId;
+  const selected = sections.find(section => section.id === selectedId);
+  const supplement = { note: "", images: [], ...(state.courseSupplements?.[selectedId] || {}) };
+  const savedCount = Number(Boolean(supplement.note.trim())) + supplement.images.length;
+  const previews = supplement.images.map((image, index) => `<article class="supplement-image">
+    <img src="${image.dataUrl}" alt="${escapeHtml(image.name)}" />
+    <div><strong>${escapeHtml(image.name)}</strong><span>已加入 ${selected.name}</span></div>
+    <button type="button" class="supplement-remove" data-action="remove-supplement-image" data-image-index="${index}" aria-label="移除 ${escapeHtml(image.name)}">移除</button>
+  </article>`).join("");
+  return `<section class="course-supplement-card" aria-labelledby="course-supplement-title">
+    <div class="supplement-heading">
+      <div><div class="row supplement-title-row"><h2 id="course-supplement-title">補充課程詳細資料</h2><span class="optional-badge">選填</span></div><p>可上傳老師公告、課綱或考試通知圖片，也可直接輸入文字。</p></div>
+      ${savedCount ? `<span class="supplement-count">已補充 ${savedCount} 筆</span>` : ""}
+    </div>
+    <div class="field supplement-course-field"><label for="supplement-course">要補充哪一門課？</label>${supplementCourseDropdown(sections, selectedId)}</div>
+    <div class="supplement-input-grid">
+      <div class="field"><span class="label">上傳圖片</span><label class="supplement-upload" for="supplement-images"><strong>＋ 選擇圖片</strong><span>課綱、老師公告、考試或作業通知</span><small>最多 3 張，每張不超過 900 KB</small></label><input id="supplement-images" class="visually-hidden" type="file" accept="image/*" multiple /></div>
+      <div class="field"><label for="supplement-note">文字說明</label><textarea id="supplement-note" data-supplement-note placeholder="例如：期中考改到 11/20，範圍是第一章到第四章。">${escapeHtml(supplement.note)}</textarea></div>
+    </div>
+    ${state.supplementUploadError ? `<div class="supplement-error" role="alert">${escapeHtml(state.supplementUploadError)}</div>` : ""}
+    ${previews ? `<div class="supplement-images">${previews}</div>` : ""}
+    <div class="supplement-footer"><span>不補充也可以直接繼續，不會影響後面的設定。</span><button class="btn secondary" type="button" data-action="save-course-supplement">儲存補充資料</button></div>
+  </section>`;
+}
+
 function courseResults(query = "") {
   const term = query.trim().toLowerCase();
   return COURSE_CATALOG.filter(course => [course.code, course.name, course.teacher].some(value => value.toLowerCase().includes(term))).map(course => {
@@ -340,7 +392,7 @@ function coursePreferenceCard(section) {
 
 function availabilitySetup() {
   const sections = selectedSections();
-  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整每門課的讀書條件</h1><p class="muted">這些設定會成為 AI 安排讀書任務的依據，之後都可以再修改。</p></div><div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>自訂行程只用來占用時間，不會產生讀書任務。</span></div><form id="study-settings-form" class="stack-lg"><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div><div class="settings-form-actions"><button class="btn primary" type="button" data-action="save-study-settings">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
+  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整每門課的讀書條件</h1><p class="muted">這些設定會成為 AI 安排讀書任務的依據，之後都可以再修改。</p></div><div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>自訂行程只用來占用時間，不會產生讀書任務。</span></div><form id="study-settings-form" class="stack-lg"><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div>${courseSupplementSection(sections)}<div class="settings-form-actions"><button class="btn primary" type="button" data-action="save-study-settings">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
 }
 
 function saveStudySettings(form = document.querySelector("#study-settings-form")) {
@@ -491,6 +543,32 @@ function updateCoursePreference(target) {
   return true;
 }
 
+function currentSupplement() {
+  const sectionId = state.supplementCourseId || selectedSections()[0]?.id;
+  state.courseSupplements ||= {};
+  state.courseSupplements[sectionId] = {
+    note: "",
+    images: [],
+    ...(state.courseSupplements[sectionId] || {}),
+  };
+  return { sectionId, supplement: state.courseSupplements[sectionId] };
+}
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, type: file.type, dataUrl: reader.result });
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderAtCurrentScroll() {
+  const scrollTop = window.scrollY;
+  render();
+  window.requestAnimationFrame(() => window.scrollTo(0, scrollTop));
+}
+
 document.addEventListener("submit", (event) => {
   if (event.target.id === "custom-activity-form") {
     event.preventDefault();
@@ -525,7 +603,32 @@ document.addEventListener("submit", (event) => {
   window.setTimeout(() => setState({ setupStep: 3 }), 1200);
 });
 
-document.addEventListener("change", (event) => {
+document.addEventListener("change", async (event) => {
+  if (event.target.id === "supplement-images") {
+    const { sectionId, supplement } = currentSupplement();
+    if (!sectionId) return;
+    const availableSlots = Math.max(0, 3 - supplement.images.length);
+    const chosen = [...event.target.files].slice(0, availableSlots);
+    const oversized = chosen.filter(file => file.size > 900 * 1024);
+    const valid = chosen.filter(file => file.type.startsWith("image/") && file.size <= 900 * 1024);
+    state.supplementUploadError = oversized.length
+      ? `有 ${oversized.length} 張圖片超過 900 KB，請先壓縮後再上傳。`
+      : availableSlots === 0
+        ? "每門課最多上傳 3 張圖片。"
+        : "";
+    try {
+      const images = await Promise.all(valid.map(readImageFile));
+      state.courseSupplements[sectionId] = { ...supplement, images: [...supplement.images, ...images] };
+      save();
+      renderAtCurrentScroll();
+    } catch {
+      state.courseSupplements[sectionId] = supplement;
+      state.supplementUploadError = "圖片讀取或儲存失敗，請縮小圖片後重新選擇。";
+      try { save(); } catch {}
+      renderAtCurrentScroll();
+    }
+    return;
+  }
   if (updateCoursePreference(event.target)) return;
   if (event.target.id === "school") {
     const form = event.target.form;
@@ -554,6 +657,13 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("input", (event) => {
   if (updateCoursePreference(event.target)) return;
+  if (event.target.matches("[data-supplement-note]")) {
+    const { sectionId, supplement } = currentSupplement();
+    if (!sectionId) return;
+    state.courseSupplements[sectionId] = { ...supplement, note: event.target.value };
+    save();
+    return;
+  }
   if (event.target.form?.id === "profile-form" && event.target.name) {
     state.profile = { ...state.profile, [event.target.name]: event.target.value };
     save();
@@ -565,6 +675,14 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const supplementCourseOption = event.target.closest("[data-supplement-course-id]");
+  if (supplementCourseOption) {
+    state.supplementCourseId = supplementCourseOption.dataset.supplementCourseId;
+    state.supplementUploadError = "";
+    save();
+    renderAtCurrentScroll();
+    return;
+  }
   const customOption = event.target.closest("[data-select-value]");
   if (customOption) {
     const customSelect = customOption.closest("[data-custom-select]");
@@ -669,6 +787,24 @@ document.addEventListener("click", (event) => {
     "back-profile": () => { setState({ setupStep: 0 }); window.scrollTo(0, 0); },
     "generate-demo-timetable": () => generateDemoTimetable(),
     "timetable-next": () => continueFromTimetable(),
+    "save-course-supplement": () => {
+      const { sectionId, supplement } = currentSupplement();
+      if (!sectionId) return;
+      const note = document.querySelector("[data-supplement-note]")?.value || "";
+      state.courseSupplements[sectionId] = { ...supplement, note, updatedAt: new Date().toISOString() };
+      state.supplementUploadError = "";
+      save();
+      showToast(note.trim() || supplement.images.length ? "已儲存這門課的補充資料。" : "這門課目前沒有補充資料。");
+    },
+    "remove-supplement-image": () => {
+      const { sectionId, supplement } = currentSupplement();
+      if (!sectionId) return;
+      const imageIndex = Number(actionButton.dataset.imageIndex);
+      state.courseSupplements[sectionId] = { ...supplement, images: supplement.images.filter((_, index) => index !== imageIndex) };
+      state.supplementUploadError = "";
+      save();
+      renderAtCurrentScroll();
+    },
     "remove-course": () => {
       const current = state.timetable[state.activeCell];
       if (current?.type === "course") removeSection(current.sectionId);
@@ -724,7 +860,7 @@ document.addEventListener("keydown", (event) => {
   if (!customSelect) return;
   const menu = customSelect.querySelector(".custom-select-menu");
   const trigger = customSelect.querySelector(".custom-select-trigger");
-  const options = [...customSelect.querySelectorAll("[data-select-value]")];
+  const options = [...customSelect.querySelectorAll("[data-select-value], [data-supplement-course-id]")];
   if (event.key === "Escape") {
     menu.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
@@ -739,7 +875,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     return;
   }
-  if (!event.target.matches?.("[data-select-value]") || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+  if (!event.target.matches?.("[data-select-value], [data-supplement-course-id]") || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
   const currentIndex = options.indexOf(event.target);
   const direction = event.key === "ArrowDown" ? 1 : -1;
   options[(currentIndex + direction + options.length) % options.length]?.focus();
