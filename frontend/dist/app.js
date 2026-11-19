@@ -1,10 +1,14 @@
 const STORAGE_KEY = "ncu-study-planner-prototype-v4";
 const VIEW_MODE_KEY = "ncu-study-planner-view-mode";
 const desktopMedia = window.matchMedia("(min-width: 900px)");
-let viewPreference = localStorage.getItem(VIEW_MODE_KEY) || "auto";
+const storedViewPreference = localStorage.getItem(VIEW_MODE_KEY);
+let viewPreference = ["desktop", "mobile"].includes(storedViewPreference)
+  ? storedViewPreference
+  : (desktopMedia.matches ? "desktop" : "mobile");
+localStorage.setItem(VIEW_MODE_KEY, viewPreference);
 
 function resolvedViewMode() {
-  return viewPreference === "auto" ? (desktopMedia.matches ? "desktop" : "mobile") : viewPreference;
+  return viewPreference;
 }
 
 function applyViewMode() {
@@ -669,16 +673,5 @@ document.addEventListener("click", (event) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
 }
-
-desktopMedia.addEventListener("change", () => {
-  if (viewPreference !== "auto") return;
-  applyViewMode();
-  const mode = resolvedViewMode();
-  document.querySelectorAll("[data-view-mode]").forEach(button => {
-    const active = button.dataset.viewMode === mode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-});
 
 render();
