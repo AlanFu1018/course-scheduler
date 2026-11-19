@@ -463,35 +463,6 @@ textarea { min-height: 118px; resize: vertical; }
 .preference-grid .field { min-width: 0; }
 .preference-grid .field label { font-size: 14px; }
 .preference-grid input, .preference-grid select { min-height: 46px; padding: 10px 11px; }
-.preference-choice-group {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-.preference-choice {
-  min-height: 39px;
-  padding: 8px 9px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: color .15s ease, background .15s ease, border-color .15s ease, box-shadow .15s ease;
-}
-.preference-choice:hover { border-color: #91bdec; color: var(--primary); }
-.preference-choice.active {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary);
-  box-shadow: inset 0 0 0 1px var(--primary);
-}
-.preference-choice:focus-visible {
-  outline: 3px solid rgba(23, 105, 210, .22);
-  outline-offset: 2px;
-}
 .input-unit { position: relative; }
 .input-unit input { padding-right: 38px; }
 .input-unit span {

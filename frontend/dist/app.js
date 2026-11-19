@@ -267,13 +267,6 @@ function preferenceOptions(options, selected) {
   return options.map(([value, label]) => `<option value="${value}" ${String(selected) === String(value) ? "selected" : ""}>${label}</option>`).join("");
 }
 
-function preferenceButtons(field, sectionId, options, selected) {
-  return `<div class="preference-choice-group" role="group" aria-label="課程難度">${options.map(([value, label]) => {
-    const active = String(selected) === String(value);
-    return `<button class="preference-choice ${active ? "active" : ""}" type="button" data-preference-choice="${field}" data-section-id="${sectionId}" data-value="${value}" aria-pressed="${active}">${label}</button>`;
-  }).join("")}</div>`;
-}
-
 function courseResults(query = "") {
   const term = query.trim().toLowerCase();
   return COURSE_CATALOG.filter(course => [course.code, course.name, course.teacher].some(value => value.toLowerCase().includes(term))).map(course => {
@@ -323,7 +316,7 @@ function coursePreferenceCard(section) {
     <div class="preference-card-head"><div><div class="row preference-title"><span class="course-category ${section.category}">${section.category === "required" ? "必修" : "通識"}</span><h2>${section.name}</h2></div><p>${section.code}・${section.teacher}</p></div><span class="status confirmed">已排入課表</span></div>
     <div class="preference-grid">
       <div class="field"><label for="${section.id}-familiarity">熟悉度</label><select id="${section.id}-familiarity" data-preference="familiarity" data-section-id="${section.id}">${preferenceOptions([["不熟悉","不熟悉"],["普通","普通"],["熟悉","熟悉"]], preference.familiarity)}</select></div>
-      <div class="field"><span class="label">課程難度</span>${preferenceButtons("difficulty", section.id, [["簡單","簡單"],["普通","普通"],["困難","困難"],["非常困難","非常困難"]], preference.difficulty)}</div>
+      <div class="field"><label for="${section.id}-difficulty">課程難度</label><select id="${section.id}-difficulty" data-preference="difficulty" data-section-id="${section.id}">${preferenceOptions([["簡單","簡單"],["普通","普通"],["困難","困難"],["非常困難","非常困難"]], preference.difficulty)}</select></div>
       <div class="field"><label for="${section.id}-target-score">目標成績</label><div class="input-unit"><input id="${section.id}-target-score" data-preference="targetScore" data-section-id="${section.id}" type="number" inputmode="numeric" min="60" max="100" value="${preference.targetScore}" /><span>分</span></div></div>
       <div class="field"><label for="${section.id}-session">單次讀書長度</label><select id="${section.id}-session" data-preference="sessionMinutes" data-section-id="${section.id}">${preferenceOptions([["25","25 分鐘"],["45","45 分鐘"],["60","60 分鐘"],["90","90 分鐘"]], preference.sessionMinutes)}</select></div>
       <div class="field"><label for="${section.id}-daily-limit">單日安排上限</label><select id="${section.id}-daily-limit" data-preference="dailyLimitMinutes" data-section-id="${section.id}">${preferenceOptions([["60","1 小時"],["90","1.5 小時"],["120","2 小時"],["180","3 小時"]], preference.dailyLimitMinutes)}</select></div>
@@ -409,15 +402,19 @@ function showToast(message) {
   save();
   render();
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => { state.toast = ""; save(); render(); }, 2600);
+  showToast.timer = window.setTimeout(() => {
+    state.toast = "";
+    save();
+    document.querySelector(".toast")?.remove();
+  }, 2600);
 }
 
 function updateCoursePreference(target) {
   const sectionId = target.dataset.sectionId;
-  const field = target.dataset.preference || target.dataset.preferenceChoice;
+  const field = target.dataset.preference;
   if (!sectionId || !field) return false;
   state.coursePreferences ||= {};
-  state.coursePreferences[sectionId] = { ...coursePreference(sectionId), [field]: target.dataset.value ?? target.value };
+  state.coursePreferences[sectionId] = { ...coursePreference(sectionId), [field]: target.value };
   save();
   return true;
 }
@@ -490,18 +487,6 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  const preferenceChoice = event.target.closest("[data-preference-choice]");
-  if (preferenceChoice) {
-    updateCoursePreference(preferenceChoice);
-    const group = preferenceChoice.closest(".preference-choice-group");
-    group?.querySelectorAll(".preference-choice").forEach(button => {
-      const active = button === preferenceChoice;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-    });
-    showToast(`已將課程難度改為「${preferenceChoice.dataset.value}」。`);
-    return;
-  }
   const viewModeButton = event.target.closest("[data-view-mode]");
   if (viewModeButton) {
     viewPreference = viewModeButton.dataset.viewMode;
