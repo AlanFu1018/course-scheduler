@@ -1,0 +1,11 @@
+{
+  "name": "NCU AI 智慧讀書規劃器",
+  "short_name": "NCU Study",
+  "description": "將課綱與空閒時間轉換成可執行的讀書計畫",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "lang": "zh-Hant"
+}
