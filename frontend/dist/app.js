@@ -180,7 +180,7 @@ function onboarding() {
       <div class="field"><label for="department">系所</label><input id="department" name="department" required placeholder="例如：資訊工程學系" value="${state.profile.department}" /></div>
       <div class="field"><label for="grade">年級</label><select id="grade" name="grade" required><option value="">請選擇年級</option>${["大一","大二","大三","大四","碩士班","博士班"].map(item => `<option ${state.profile.grade === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
       <div class="privacy-note">只收集建立課表與讀書計畫需要的資訊；目前頁面使用示意資料。</div>
-      <button class="btn primary block" type="submit">下一步，填寫課表</button>
+      <button class="btn primary block" type="button" data-action="profile-next">下一步，填寫課表</button>
     </form>
   </section>`, "基本資料");
 }
@@ -327,7 +327,51 @@ function coursePreferenceCard(section) {
 
 function availabilitySetup() {
   const sections = selectedSections();
-  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整每門課的讀書條件</h1><p class="muted">這些設定會成為 AI 安排讀書任務的依據，之後都可以再修改。</p></div><div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>自訂行程只用來占用時間，不會產生讀書任務。</span></div><form id="study-settings-form" class="stack-lg"><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div><div class="settings-form-actions"><button class="btn primary" type="submit">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
+  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整每門課的讀書條件</h1><p class="muted">這些設定會成為 AI 安排讀書任務的依據，之後都可以再修改。</p></div><div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>自訂行程只用來占用時間，不會產生讀書任務。</span></div><form id="study-settings-form" class="stack-lg"><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div><div class="settings-form-actions"><button class="btn primary" type="button" data-action="save-study-settings">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
+}
+
+function saveStudySettings(form = document.querySelector("#study-settings-form")) {
+  form?.querySelectorAll("[data-preference]").forEach(updateCoursePreference);
+  state.setupStep = 5;
+  state.highestSetupStage = Math.max(state.highestSetupStage, 4);
+  save();
+  render();
+  window.scrollTo(0, 0);
+}
+
+function saveProfileAndContinue(form = document.querySelector("#profile-form")) {
+  if (!form) return;
+  const missing = [...form.querySelectorAll("[required]")].find(field => !String(field.value || "").trim());
+  if (missing) {
+    missing.focus();
+    return showToast("請先完成所有基本資料。");
+  }
+  const profile = Object.fromEntries(new FormData(form).entries());
+  state.profile = profile;
+  state.schoolConnected = profile.school === "ncu";
+  state.setupStep = 1;
+  state.highestSetupStage = Math.max(state.highestSetupStage, 2);
+  save();
+  render();
+  window.scrollTo(0, 0);
+}
+
+function generateDemoTimetable() {
+  state.timetable = {};
+  DEMO_SECTION_IDS.forEach(sectionId => {
+    const section = COURSE_CATALOG.find(item => item.id === sectionId);
+    if (section) applySection(section);
+  });
+  state.timetable["sat-5"] = { type: "custom", title: "彈鋼琴" };
+  state.timetable["sat-7"] = { type: "custom", title: "打籃球" };
+  save();
+  showToast("已生成無衝堂示範課表：5 門必修、2 門通識與 2 個行程。");
+}
+
+function continueFromTimetable() {
+  if (!selectedSections().length) return showToast("請至少加入一門學校課程。");
+  state.highestSetupStage = Math.max(state.highestSetupStage, 3);
+  setState({ setupStep: 4, usedImportedData: true, highestSetupStage: state.highestSetupStage });
 }
 
 function planReady() {
@@ -387,6 +431,21 @@ function render() {
       goToSetupTarget(button);
     });
   });
+  const directActions = {
+    "profile-next": () => saveProfileAndContinue(),
+    "generate-demo-timetable": () => generateDemoTimetable(),
+    "timetable-next": () => continueFromTimetable(),
+    "save-study-settings": () => saveStudySettings(),
+    "back-import": () => setState({ setupStep: 1 }),
+  };
+  app.querySelectorAll("[data-action]").forEach(button => {
+    const directAction = directActions[button.dataset.action];
+    if (!directAction) return;
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      directAction();
+    });
+  });
   if (!state.setupComplete && state.setupStep === 1) {
     if (state.pendingSectionId) {
       const section = COURSE_CATALOG.find(item => item.id === state.pendingSectionId);
@@ -435,23 +494,12 @@ document.addEventListener("submit", (event) => {
   }
   if (event.target.id === "study-settings-form") {
     event.preventDefault();
-    state.setupStep = 5;
-    state.highestSetupStage = Math.max(state.highestSetupStage, 4);
-    save();
-    render();
-    window.scrollTo(0, 0);
+    saveStudySettings(event.target);
     return;
   }
   if (event.target.id === "profile-form") {
     event.preventDefault();
-    const form = Object.fromEntries(new FormData(event.target).entries());
-    state.profile = form;
-    state.schoolConnected = form.school === "ncu";
-    state.setupStep = 1;
-    state.highestSetupStage = Math.max(state.highestSetupStage, 2);
-    save();
-    render();
-    window.scrollTo(0, 0);
+    saveProfileAndContinue(event.target);
     return;
   }
   if (event.target.id !== "course-form") return;
@@ -470,7 +518,19 @@ document.addEventListener("change", (event) => {
     const form = event.target.form;
     state.profile = { ...state.profile, ...Object.fromEntries(new FormData(form).entries()) };
     save();
-    render();
+    const support = document.querySelector("#school-support");
+    if (support) {
+      const isNcu = event.target.value === "ncu";
+      support.classList.toggle("supported", isNcu);
+      support.innerHTML = isNcu
+        ? `<strong>中央大學資料可用</strong><span>下一頁可搜尋課號、課名或授課老師。</span>`
+        : `<strong>選擇中央大學即可串接</strong><span>原型會先使用模擬課程資料，之後替換為後端 API。</span>`;
+    }
+    return;
+  }
+  if (event.target.form?.id === "profile-form" && event.target.name) {
+    state.profile = { ...state.profile, [event.target.name]: event.target.value };
+    save();
     return;
   }
   if (event.target.dataset.assessment) {
@@ -481,6 +541,11 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("input", (event) => {
   if (updateCoursePreference(event.target)) return;
+  if (event.target.form?.id === "profile-form" && event.target.name) {
+    state.profile = { ...state.profile, [event.target.name]: event.target.value };
+    save();
+    return;
+  }
   if (event.target.id !== "course-search") return;
   const results = document.querySelector("#course-results");
   if (results) results.innerHTML = courseResults(event.target.value);
@@ -541,28 +606,16 @@ document.addEventListener("click", (event) => {
       window.setTimeout(() => document.querySelector("#course-search")?.focus(), 80);
     },
     "start-setup": () => setState({ setupStep: 1 }),
+    "profile-next": () => saveProfileAndContinue(),
+    "save-study-settings": () => saveStudySettings(),
     "accept-imported-data": () => setState({ setupStep: 4, usedImportedData: true }),
     "sync-school-data": () => showToast("已完成同步，目前資料是最新版本。"),
     "back-import": () => setState({ setupStep: 1 }),
     "load-demo": () => setState({ setupComplete: true, setupStep: 5, route: "today" }),
     "back-onboarding": () => setState({ setupStep: 0 }),
     "back-profile": () => { setState({ setupStep: 0 }); window.scrollTo(0, 0); },
-    "generate-demo-timetable": () => {
-      state.timetable = {};
-      DEMO_SECTION_IDS.forEach(sectionId => {
-        const section = COURSE_CATALOG.find(item => item.id === sectionId);
-        if (section) applySection(section);
-      });
-      state.timetable["sat-5"] = { type: "custom", title: "彈鋼琴" };
-      state.timetable["sat-7"] = { type: "custom", title: "打籃球" };
-      save();
-      showToast("已生成無衝堂示範課表：5 門必修、2 門通識與 2 個行程。");
-    },
-    "timetable-next": () => {
-      if (!selectedSections().length) return showToast("請至少加入一門學校課程。");
-      state.highestSetupStage = Math.max(state.highestSetupStage, 3);
-      setState({ setupStep: 4, usedImportedData: true, highestSetupStage: state.highestSetupStage });
-    },
+    "generate-demo-timetable": () => generateDemoTimetable(),
+    "timetable-next": () => continueFromTimetable(),
     "remove-course": () => {
       const current = state.timetable[state.activeCell];
       if (current?.type === "course") removeSection(current.sectionId);
@@ -620,7 +673,12 @@ if ("serviceWorker" in navigator) {
 desktopMedia.addEventListener("change", () => {
   if (viewPreference !== "auto") return;
   applyViewMode();
-  render();
+  const mode = resolvedViewMode();
+  document.querySelectorAll("[data-view-mode]").forEach(button => {
+    const active = button.dataset.viewMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 });
 
 render();
