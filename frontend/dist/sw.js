@@ -1,4 +1,4 @@
-const CACHE = "ncu-study-planner-prototype-v26";
+const CACHE = "ncu-study-planner-prototype-v27";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", event => {

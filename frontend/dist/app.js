@@ -526,6 +526,14 @@ function bindInteractiveControls(root = document) {
       handleCourseOption(button);
     });
   });
+  root.querySelectorAll("form:not([data-submit-bound])").forEach(form => {
+    form.dataset.submitBound = "true";
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleFormSubmit(form);
+    });
+  });
 }
 
 function render() {
@@ -714,10 +722,9 @@ function handleActionButton(actionButton) {
   actions[action]?.();
 }
 
-document.addEventListener("submit", (event) => {
-  if (event.target.id === "custom-activity-form") {
-    event.preventDefault();
-    const title = new FormData(event.target).get("title")?.trim();
+function handleFormSubmit(formElement) {
+  if (formElement.id === "custom-activity-form") {
+    const title = new FormData(formElement).get("title")?.trim();
     if (!title) return;
     const existing = state.timetable[state.activeCell];
     if (existing?.type === "course") removeSection(existing.sectionId);
@@ -728,24 +735,26 @@ document.addEventListener("submit", (event) => {
     render();
     return;
   }
-  if (event.target.id === "study-settings-form") {
-    event.preventDefault();
-    saveStudySettings(event.target);
+  if (formElement.id === "study-settings-form") {
+    saveStudySettings(formElement);
     return;
   }
-  if (event.target.id === "profile-form") {
-    event.preventDefault();
-    saveProfileAndContinue(event.target);
+  if (formElement.id === "profile-form") {
+    saveProfileAndContinue(formElement);
     return;
   }
-  if (event.target.id !== "course-form") return;
-  event.preventDefault();
-  const form = new FormData(event.target);
+  if (formElement.id !== "course-form") return;
+  const form = new FormData(formElement);
   state.course = Object.fromEntries(form.entries());
   state.setupStep = 2;
   save();
   render();
   window.setTimeout(() => setState({ setupStep: 3 }), 1200);
+}
+
+document.addEventListener("submit", (event) => {
+  event.preventDefault();
+  handleFormSubmit(event.target);
 });
 
 document.addEventListener("change", async (event) => {
