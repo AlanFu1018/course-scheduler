@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import type { DatabaseSync } from 'node:sqlite';
+import { RequestError } from './errors.ts';
 
 export function parsePlanningJson(text: string, jsonc = false): unknown {
   text = text.replace(/^\uFEFF/, '');
@@ -57,7 +58,7 @@ export interface PlanningSource { load(userId: string): Promise<PlanningInput> }
 type FilePath = string | URL;
 
 export function check(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
+  if (!condition) throw new RequestError(message);
 }
 
 export function isDate(value: unknown): value is string {

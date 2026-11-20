@@ -4,6 +4,7 @@ import type { Day, Scope } from './availability.ts';
 import { check, isDate, timeMinutes } from './data.ts';
 import type { Course, PlanningInput } from './data.ts';
 import type { LlmService } from './llm.ts';
+import { GeminiResponseError, RequestError } from './errors.ts';
 
 const taskTypes = ['reading', 'notes', 'examples', 'past_exam', 'mock_exam', 'error_review', 'final_review', 'homework', 'review'] as const;
 const phases = ['learn', 'practice', 'sprint'] as const;
@@ -110,7 +111,7 @@ function assessmentDeadline(assessment: Course['assessments'][number]) {
 }
 
 function isExamPreparation(task: TaskDraft) {
-  return examPrepTypes.has(task.type) || /(?:期中|期末|考前).*(?:備考|準備|複習|模擬|考題)/.test(task.title);
+  return examPrepTypes.has(task.type);
 }
 
 function validateTask(task: TaskDraft, courses: Course[], scope: Scope): TaskDraft {
@@ -226,6 +227,7 @@ async function generateValidated<T>(
     } catch (retryError) {
       log?.(`修正後驗證仍失敗：${(retryError as Error).message}`);
       if (fallback) return fallback(second, (retryError as Error).message);
+      if (retryError instanceof RequestError) throw new GeminiResponseError(retryError.message, { cause: retryError });
       throw retryError;
     }
   }
@@ -379,10 +381,10 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       });
       return validatePlacement({ summary: proposal.summary, blocks }, tasks, batchDays, courses, remaining);
     };
-    const validateBatch = (value: unknown) => {
-      const part = validateBlocks(value);
+    const completionErrors = (blocks: BlockDraft[]) => {
+      const errors = new Map<string, string>();
       const totals = new Map<string, number>();
-      for (const block of part.blocks) {
+      for (const block of blocks) {
         totals.set(block.task_id, (totals.get(block.task_id) ?? 0) + timeMinutes(block.end_time) - timeMinutes(block.start_time));
       }
       const end = batch.at(-1)!.to;
@@ -390,16 +392,26 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
         const minutes = totals.get(candidate.task_id);
         const leftover = candidate.remaining_minutes - (minutes ?? 0);
         if (minutes && leftover > 0 && i < batches.length - 1 && candidate.deadline > end) {
-          const future = days.filter(day => day.date > end && day.date <= candidate.deadline);
-          check(future.some(day => minimumBlock(day) <= leftover),
+          const task = tasks.find(t => t.task_id === candidate.task_id)!;
+          const course = courses.find(c => c.course_key === task.course_key)!;
+          const feasible = days.some(day => day.date > end && !dateRestriction(task, course, day)
+            && minimumBlock(day) <= leftover && day.slots.some(slot =>
+              timeMinutes(slot.end_time) - timeMinutes(slot.start_time) >= minimumBlock(day)));
+          if (!feasible) errors.set(candidate.task_id,
             `${candidate.title} 跨批剩餘 ${leftover} 分鐘無法形成後續時段，請調整本批分段。`);
         }
         if (minutes && (i === batches.length - 1 || candidate.deadline <= end)) {
-          check(minutes === candidate.remaining_minutes,
+          if (leftover > 0) errors.set(candidate.task_id,
             `${candidate.title} 最後可安排的批次需排足 ${candidate.remaining_minutes} 分，目前只有 ${minutes} 分；請補足或說明無法排入。`);
         }
       }
 
+      return errors;
+    };
+    const validateBatch = (value: unknown) => {
+      const part = validateBlocks(value);
+      const errors = completionErrors(part.blocks);
+      check(!errors.size, [...errors.values()].join('\n'));
       return part;
     };
     const part = await run.step(`blocks-${i}`, () => generateValidated(llm, run.log, prompt(
@@ -418,7 +430,9 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
             } catch { /* Keep only model-proposed blocks that pass every constraint. */ }
           }
         }
-        return validateBlocks({ summary: `${batch[0].from} 起的部分時段未通過驗證：${reason}。`, blocks: choices });
+        const summary = `${batch[0].from} 起的部分時段未通過驗證：${reason}。`;
+        const errors = completionErrors(validateBlocks({ summary, blocks: choices }).blocks);
+        return validateBlocks({ summary, blocks: choices.filter(block => !errors.has(block.task_id)) });
       }));
     summaries.push(part.summary);
     for (const block of part.blocks) {

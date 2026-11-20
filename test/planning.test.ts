@@ -3,7 +3,8 @@ import { readdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { mock, test } from 'node:test';
 import { availableDays } from '../src/availability.ts';
-import { filePlanningSource, parsePlanningJson, readPlanningFile, sqlitePlanningSource } from '../src/data.ts';
+import { check, filePlanningSource, parsePlanningJson, readPlanningFile, sqlitePlanningSource } from '../src/data.ts';
+import { errorStatus } from '../src/errors.ts';
 import type { PlanningInput } from '../src/data.ts';
 import { GeminiLlmService } from '../src/llm.ts';
 import type { LlmService } from '../src/llm.ts';
@@ -153,6 +154,90 @@ const draft = {
   type: 'reading', phase: 'learn', priority: 0.65, reason: '期末考範圍',
   deadline: '2026-12-20', estimate: { base_minutes: 60, difficulty_mult: 1.2, familiarity_mult: 1.2, speed_factor: 1.05 },
 };
+
+test('all-day events block local dates up to the exclusive end', async () => {
+  const input = await source.load(userId);
+  const dates = ['2026-09-10', '2026-09-11', '2026-09-12'];
+  const slots = [{ start_time: '06:00', end_time: '07:00' }];
+  input.user.date_overrides = dates.map(date => ({ date, slots }));
+  input.user.calendar_sources.push({ source_id: 'busy', treat_as: 'busy' });
+  for (const event of [
+    { all_day: false, start_at: dates[0], end_at: dates[2] },
+    { all_day: true, start_at: '2026-09-09T23:00:00Z', end_at: '2026-09-11T23:00:00Z' },
+  ]) {
+    input.calendar_events = [{ ...event, user_id: userId, source_id: 'busy' }];
+    const days = availableDays(input, { from: dates[0], to: dates[2], course_keys: [] });
+    assert.deepEqual(days.map(d => [d.date, d.slots]), [[dates[2], slots]]);
+  }
+});
+
+test('a project preparation title is valid for a homework task', async () => {
+  const input = await source.load(userId);
+  const course = input.courses.find(c => c.course_key === 'self_fitness')!;
+  const project = course.assessments.find(a => a.type === 'project')!;
+  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: [course.course_key] };
+  const title = '期末專題準備';
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n').at(-1)!);
+    if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: title }] }] };
+    if (data.previous_tasks) return { tasks: [{ ...draft, course_key: course.course_key, title, type: 'homework',
+      chapters: [], assessment_id: project.id, deadline: scope.to, focus_id: data.batch_focus[0].id }] };
+    return { summary: title, blocks: [] };
+  } });
+  assert.equal(result.tasks[0].assessment_id, project.id);
+});
+
+test('fallback saves complete placements and drops a partially placed task at its deadline', async () => {
+  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: [draft.course_key] };
+  const input = await source.load(userId);
+  let blocks: unknown;
+  let proposal: object;
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    if (proposal) return proposal;
+    const data = JSON.parse(prompt.split('\n').at(-1)!);
+    if (data.weeks) return { weeks: [{ from: scope.from, focus: ['partial', 'complete'].map(topic => ({
+      course_key: draft.course_key, topic,
+    })) }] };
+    if (data.previous_tasks) return { tasks: data.batch_focus.map((f: {id: string; topic: string}) => ({
+      ...draft, title: f.topic, focus_id: f.id, assessment_id: null, deadline: scope.to,
+      estimate: { base_minutes: f.topic === 'partial' ? 90 : 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 },
+    })) };
+    proposal = { summary: 'placement', blocks: data.tasks.map((t: {task_id: string; title: string}) => ({
+      task_id: t.task_id, date: scope.from, start_time: t.title === 'partial' ? '19:00' : '20:00', option: 1, segment: 1,
+    })) };
+    return proposal;
+  } }, new Date(), { progress() {}, async step(name, compute) {
+    const value = await compute();
+    if (name === 'blocks-0') blocks = (value as { blocks: unknown }).blocks;
+    return value;
+  } });
+  const complete = result.tasks.find(t => t.title === 'complete')!;
+  assert.deepEqual(blocks, [{ task_id: complete.task_id, date: scope.from, start_time: '20:00', end_time: '20:30' }]);
+});
+
+test('request, internal and Gemini errors get distinct statuses and transient failures retry three times', async t => {
+  assert.throws(() => check(false, 'invalid input'), error => errorStatus(error) === 400);
+  assert.equal(errorStatus(new Error('database failure')), 500);
+  const waits: number[] = [];
+  t.mock.method(globalThis, 'setTimeout', (resume: () => void, delay: number) => {
+    waits.push(delay);
+    queueMicrotask(resume);
+  });
+  const service = new GeminiLlmService('test');
+  for (const [kind, attempts] of [['500', 4], ['TimeoutError', 4], ['AbortError', 4], ['403', 1], ['incomplete', 1]] as const) {
+    waits.length = 0;
+    const stub = t.mock.method(globalThis, 'fetch', async () => {
+      if (kind.endsWith('Error')) throw new DOMException('timeout', kind);
+      if (kind === 'incomplete') return Response.json({ candidates: [{ finishReason: 'MAX_TOKENS' }] });
+      return new Response(null, { status: Number(kind) });
+    });
+    await assert.rejects(service.generate('test', {}), error => errorStatus(error) === 502);
+    assert.equal(stub.mock.callCount(), attempts);
+    assert.equal(waits.length, attempts - 1);
+    waits.forEach((delay, i) => assert.ok(delay >= 1000 * 2 ** i && delay < 1000 * 2 ** i + 500));
+    stub.mock.restore();
+  }
+});
 
 test('weekly analysis then all task batches, cross-batch placement and checkpoint resume', async () => {
   const input = await source.load(userId);

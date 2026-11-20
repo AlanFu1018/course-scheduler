@@ -1,4 +1,4 @@
-import { timeMinutes } from './data.ts';
+import { isDate, timeMinutes } from './data.ts';
 import type { PlanningInput, Slot } from './data.ts';
 
 export type Scope = { from: string; to: string; course_keys: string[] };
@@ -36,8 +36,18 @@ export function availableDays(input: PlanningInput, scope: Scope): Day[] {
   const sources = new Set(user.calendar_sources.filter(source => source.treat_as === 'busy').map(source => source.source_id));
   const local = localParts(user.timezone);
   const busy = new Map<string, Set<number>>();
+  const busyDates = new Set<string>();
   for (const event of input.calendar_events) {
     if (!sources.has(event.source_id)) continue;
+    if (event.all_day || (isDate(event.start_at) && isDate(event.end_at))) {
+      const localDate = (value: string) => isDate(value) ? value : local.format(Date.parse(value)).slice(0, 10);
+      const start = localDate(event.start_at);
+      const end = localDate(event.end_at);
+      for (let date = start < scope.from ? scope.from : start; date < end && date <= scope.to; date = shiftDate(date, 1)) {
+        busyDates.add(date);
+      }
+      continue;
+    }
     const from = Date.parse(event.start_at);
     const to = Date.parse(event.end_at);
     // Work in elapsed minutes first so offsets and changes of offset are respected.
@@ -54,6 +64,7 @@ export function availableDays(input: PlanningInput, scope: Scope): Day[] {
   const rules = [...user.availability].sort((a, b) => b.valid_from.localeCompare(a.valid_from));
   const days: Day[] = [];
   for (let date = scope.from; date <= scope.to; date = shiftDate(date, 1)) {
+    if (busyDates.has(date)) continue;
     const rule = rules.find(rule => rule.valid_from <= date && date <= rule.valid_to);
     if (!rule) continue;
     const weekday = new Date(date + 'T00:00:00Z').getUTCDay() || 7;

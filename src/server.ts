@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { check, filePlanningSource, sqlitePlanningSource } from './data.ts';
 import { GeminiLlmService, GeminiUnavailable } from './llm.ts';
+import { errorStatus, RequestError } from './errors.ts';
 import { generateInitialPlan } from './planner.ts';
 import { checkpointRun } from './checkpoints.ts';
 import { planHistory } from './plan-history.ts';
@@ -43,7 +44,11 @@ async function requestBody(request: IncomingMessage) {
     body += chunk;
     check(body.length <= 16_384, '請求過大');
   }
-  return JSON.parse(body) as { user_id?: string; scope?: Scope };
+  try {
+    return JSON.parse(body) as { user_id?: string; scope?: Scope };
+  } catch (error) {
+    throw new RequestError('請求不是有效的 JSON', { cause: error });
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -138,7 +143,7 @@ const server = createServer(async (request, response) => {
     json(response, 404, { error: '找不到頁面' });
   } catch (error) {
     if (error instanceof GeminiUnavailable) response.setHeader('Retry-After', error.retryAfter);
-    json(response, error instanceof GeminiUnavailable ? error.status : 400, { error: (error as Error).message });
+    json(response, errorStatus(error), { error: error instanceof Error ? error.message : '伺服器錯誤' });
   }
 });
 

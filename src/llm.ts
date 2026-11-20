@@ -1,16 +1,9 @@
+import { GeminiResponseError, GeminiUnavailable } from './errors.ts';
+export { GeminiUnavailable } from './errors.ts';
+
 export interface LlmService {
   readonly model: string;
   generate(prompt: string, schema: object): Promise<unknown>;
-}
-
-export class GeminiUnavailable extends Error {
-  readonly status: number;
-  readonly retryAfter: number;
-  constructor(message: string, status: number, retryAfter: number) {
-    super(message);
-    this.status = status;
-    this.retryAfter = retryAfter;
-  }
 }
 
 export class GeminiLlmService implements LlmService {
@@ -27,22 +20,37 @@ export class GeminiLlmService implements LlmService {
 
   async generate(prompt: string, schema: object): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const response = await this.request(prompt, schema);
-      if (response.ok) return this.decode(response);
-      if (![429, 503].includes(response.status)) throw new Error(`Gemini API 請求失敗（HTTP ${response.status}）。`);
-      const body = await response.text();
-      const daily = response.status === 429 && /per.?day|daily|requestsperday/i.test(body);
-      const header = response.headers.get('retry-after');
+      let response: Response | undefined;
+      let body = '';
+      try {
+        response = await this.request(prompt, schema);
+        if (response.ok) return await this.decode(response);
+        if (![429, 500, 503].includes(response.status)) {
+          throw new GeminiResponseError(`Gemini API 請求失敗（HTTP ${response.status}）。`);
+        }
+        body = await response.text();
+      } catch (error) {
+        if (error instanceof GeminiResponseError) throw error;
+        if (!(error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))) {
+          throw new GeminiResponseError('Gemini 請求或回應格式錯誤。', { cause: error });
+        }
+        response = undefined;
+      }
+      const status = response?.status;
+      const failure = status ? `HTTP ${status}` : '請求逾時';
+      const daily = status === 429 && /per.?day|daily|requestsperday/i.test(body);
+      const header = response?.headers.get('retry-after');
       const headerMs = header && /^\d+(\.\d+)?$/.test(header) ? Number(header) * 1000 : Date.parse(header ?? '') - Date.now();
       const hint = /"retryDelay"\s*:\s*"([\d.]+)s"/.exec(body);
       const delay = Math.max(Number.isFinite(headerMs) ? headerMs : 0, Number(hint?.[1] ?? 0) * 1000,
         1000 * 2 ** attempt + Math.random() * 500);
       if (daily || attempt >= 3) {
-        const reason = daily ? '每日配額不足' : `HTTP ${response.status}，建議等待 ${Math.ceil(delay / 1000)} 秒`;
+        if (status !== 429 && status !== 503) throw new GeminiResponseError(`Gemini ${failure}。`);
+        const reason = daily ? '每日配額不足' : `${failure}，建議等待 ${Math.ceil(delay / 1000)} 秒`;
         throw new GeminiUnavailable(`Gemini ${reason}。已保留批次進度，稍後用相同設定重新產生即可續跑。`,
-          response.status, Math.ceil(delay / 1000));
+          status, Math.ceil(delay / 1000));
       }
-      this.notify(`Gemini HTTP ${response.status}，${Math.ceil(delay / 1000)} 秒後重試（${attempt + 1}/3）`);
+      this.notify(`Gemini ${failure}，${Math.ceil(delay / 1000)} 秒後重試（${attempt + 1}/3）`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -69,7 +77,7 @@ export class GeminiLlmService implements LlmService {
     const candidate = body.candidates?.[0];
     const text = candidate?.content?.parts?.filter(part => !part.thought).map(part => part.text).join('');
     if (!text || candidate?.finishReason !== 'STOP') {
-      throw new Error(`Gemini 未回傳完整結果（${candidate?.finishReason ?? '無候選回應'}）。`);
+      throw new GeminiResponseError(`Gemini 未回傳完整結果（${candidate?.finishReason ?? '無候選回應'}）。`);
     }
     return JSON.parse(text);
   }
