@@ -103,6 +103,8 @@ const defaultState = {
     { id: 3, time: "21:10–21:40", course: "離散數學", title: "複習命題邏輯", duration: 30, done: false },
   ],
   replanCount: 0,
+  calendarDay: "thu",
+  replanReason: "臨時有事",
   toast: "",
 };
 
@@ -454,7 +456,12 @@ function taskCard(task) {
 }
 
 function calendarPage() {
-  return shell(`<section class="content stack-lg"><div><div class="eyebrow">本週</div><h1 class="page-title">讀書行事曆</h1><p class="muted">先以單日時間軸確認流程，之後再加入完整週曆。</p></div><div class="chips"><button class="chip active">星期四</button><button class="chip">星期五</button><button class="chip">星期六</button></div><div class="timeline">${state.tasks.map(t => `<div class="timeline-row"><div class="timeline-time">${t.time.split("–")[0]}</div><div class="timeline-body"><div class="timeline-block"><strong>${t.course}</strong><div class="small">${t.title}</div></div></div></div>`).join("")}</div><button class="btn secondary block" data-action="go-today">回到今日任務</button></section>`, "行事曆");
+  const days = [["thu", "星期四"], ["fri", "星期五"], ["sat", "星期六"]];
+  const tasks = state.calendarDay === "thu" ? state.tasks : [];
+  const timeline = tasks.length
+    ? tasks.map(t => `<div class="timeline-row"><div class="timeline-time">${t.time.split("–")[0]}</div><div class="timeline-body"><div class="timeline-block"><strong>${t.course}</strong><div class="small">${t.title}</div></div></div></div>`).join("")
+    : `<div class="card soft small"><strong>這天還沒有讀書任務</strong><br>正式版會依課表空堂與截止日期自動安排。</div>`;
+  return shell(`<section class="content stack-lg"><div><div class="eyebrow">本週</div><h1 class="page-title">讀書行事曆</h1><p class="muted">先以單日時間軸確認流程，之後再加入完整週曆。</p></div><div class="chips">${days.map(([value, label]) => `<button type="button" class="chip ${state.calendarDay === value ? "active" : ""}" data-calendar-day="${value}" aria-pressed="${state.calendarDay === value}">${label}</button>`).join("")}</div><div class="timeline">${timeline}</div><button type="button" class="btn secondary block" data-action="go-today">回到今日任務</button></section>`, "行事曆");
 }
 
 function coursesPage() {
@@ -468,13 +475,15 @@ function progressPage() {
 
 function taskModal(id) {
   const task = state.tasks.find(t => t.id === id);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal stack-lg"><div><div class="eyebrow">動態重新排程</div><h2 class="page-title">今天為什麼做不完？</h2><p class="muted">${task.title}</p></div><div class="chips"><button class="chip active" data-reason="臨時有事">臨時有事</button><button class="chip" data-reason="任務比預期困難">比預期困難</button><button class="chip" data-reason="身體狀況不佳">狀況不佳</button></div><div class="button-grid"><button class="btn secondary" data-action="close-modal">取消</button><button class="btn primary" data-action="confirm-replan" data-id="${id}">移到下一個空堂</button></div></section></div>`;
+  const reasons = ["臨時有事", "任務比預期困難", "身體狀況不佳"];
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal stack-lg"><div><div class="eyebrow">動態重新排程</div><h2 class="page-title">今天為什麼做不完？</h2><p class="muted">${task.title}</p></div><div class="chips">${reasons.map(reason => `<button type="button" class="chip ${state.replanReason === reason ? "active" : ""}" data-reason="${reason}" aria-pressed="${state.replanReason === reason}">${reason === "任務比預期困難" ? "比預期困難" : reason === "身體狀況不佳" ? "狀況不佳" : reason}</button>`).join("")}</div><div class="button-grid"><button type="button" class="btn secondary" data-action="close-modal">取消</button><button type="button" class="btn primary" data-action="confirm-replan" data-id="${id}">移到下一個空堂</button></div></section></div>`;
 }
 
 function goToSetupTarget(button) {
   const stage = Number(button.dataset.stage);
   if (button.disabled || stage > state.highestSetupStage) return;
   state.setupStep = Number(button.dataset.setupTarget);
+  state.setupComplete = false;
   save();
   render();
   window.scrollTo(0, 0);
@@ -675,6 +684,24 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const reasonButton = event.target.closest("[data-reason]");
+  if (reasonButton) {
+    state.replanReason = reasonButton.dataset.reason;
+    save();
+    reasonButton.closest(".chips")?.querySelectorAll("[data-reason]").forEach(button => {
+      const selected = button === reasonButton;
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    return;
+  }
+  const calendarDayButton = event.target.closest("[data-calendar-day]");
+  if (calendarDayButton) {
+    state.calendarDay = calendarDayButton.dataset.calendarDay;
+    save();
+    render();
+    return;
+  }
   const supplementCourseOption = event.target.closest("[data-supplement-course-id]");
   if (supplementCourseOption) {
     state.supplementCourseId = supplementCourseOption.dataset.supplementCourseId;
@@ -839,7 +866,7 @@ document.addEventListener("click", (event) => {
     "back-course": () => setState({ setupStep: 1 }),
     "confirm-assessment": () => setState({ setupStep: 4 }),
     "back-assessment": () => setState({ setupStep: 3 }),
-    "back-availability": () => setState({ setupStep: 4 }),
+    "back-availability": () => setState({ setupComplete: false, setupStep: 4 }),
     "finish-setup": () => setState({ setupComplete: true, route: "today" }),
     "complete-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: true } : t); showToast("已記錄完成，進度已更新。 "); },
     "undo-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: false } : t); setState({ tasks: state.tasks }); },
@@ -856,6 +883,14 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.querySelector(".modal-backdrop")) {
+    state.activeCell = "";
+    state.pendingSectionId = "";
+    document.querySelector(".modal-backdrop")?.remove();
+    save();
+    event.preventDefault();
+    return;
+  }
   const customSelect = event.target.closest?.("[data-custom-select]");
   if (!customSelect) return;
   const menu = customSelect.querySelector(".custom-select-menu");
