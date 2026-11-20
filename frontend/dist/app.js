@@ -499,25 +499,10 @@ function render() {
     html = ({ today: todayPage, calendar: calendarPage, courses: coursesPage, progress: progressPage }[state.route] || todayPage)();
   }
   app.innerHTML = html;
-  app.querySelectorAll(".setup-step[data-setup-target]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.stopPropagation();
-      goToSetupTarget(button);
-    });
-  });
-  const directActions = {
-    "profile-next": () => saveProfileAndContinue(),
-    "generate-demo-timetable": () => generateDemoTimetable(),
-    "timetable-next": () => continueFromTimetable(),
-    "save-study-settings": () => saveStudySettings(),
-    "back-import": () => setState({ setupStep: 1 }),
-  };
   app.querySelectorAll("[data-action]").forEach(button => {
-    const directAction = directActions[button.dataset.action];
-    if (!directAction) return;
     button.addEventListener("click", event => {
       event.stopPropagation();
-      directAction();
+      handleActionButton(button);
     });
   });
   if (!state.setupComplete && state.setupStep === 1) {
@@ -576,6 +561,96 @@ function renderAtCurrentScroll() {
   const scrollTop = window.scrollY;
   render();
   window.requestAnimationFrame(() => window.scrollTo(0, scrollTop));
+}
+
+function handleActionButton(actionButton) {
+  const action = actionButton.dataset.action;
+  const id = Number(actionButton.dataset.id);
+  const actions = {
+    "goto-setup-step": () => goToSetupTarget(actionButton),
+    "open-cell": () => {
+      state.activeCell = actionButton.dataset.cell;
+      save();
+      render();
+      window.setTimeout(() => document.querySelector("#course-search")?.focus(), 80);
+    },
+    "start-setup": () => setState({ setupStep: 1 }),
+    "profile-next": () => saveProfileAndContinue(),
+    "save-study-settings": () => saveStudySettings(),
+    "accept-imported-data": () => setState({ setupStep: 4, usedImportedData: true }),
+    "sync-school-data": () => showToast("已完成同步，目前資料是最新版本。"),
+    "back-import": () => setState({ setupStep: 1 }),
+    "load-demo": () => setState({ setupComplete: true, setupStep: 5, route: "today" }),
+    "back-onboarding": () => setState({ setupStep: 0 }),
+    "back-profile": () => { setState({ setupStep: 0 }); window.scrollTo(0, 0); },
+    "generate-demo-timetable": () => generateDemoTimetable(),
+    "timetable-next": () => continueFromTimetable(),
+    "save-course-supplement": () => {
+      const { sectionId, supplement } = currentSupplement();
+      if (!sectionId) return;
+      const note = document.querySelector("[data-supplement-note]")?.value || "";
+      state.courseSupplements[sectionId] = { ...supplement, note, updatedAt: new Date().toISOString() };
+      state.supplementUploadError = "";
+      save();
+      showToast(note.trim() || supplement.images.length ? "已儲存這門課的補充資料。" : "這門課目前沒有補充資料。");
+    },
+    "remove-supplement-image": () => {
+      const { sectionId, supplement } = currentSupplement();
+      if (!sectionId) return;
+      const imageIndex = Number(actionButton.dataset.imageIndex);
+      state.courseSupplements[sectionId] = { ...supplement, images: supplement.images.filter((_, index) => index !== imageIndex) };
+      state.supplementUploadError = "";
+      save();
+      renderAtCurrentScroll();
+    },
+    "remove-course": () => {
+      const current = state.timetable[state.activeCell];
+      if (current?.type === "course") removeSection(current.sectionId);
+      else delete state.timetable[state.activeCell];
+      state.activeCell = "";
+      document.querySelector(".modal-backdrop")?.remove();
+      save();
+      render();
+    },
+    "cancel-conflict": () => {
+      state.pendingSectionId = "";
+      state.activeCell = "";
+      document.querySelector(".modal-backdrop")?.remove();
+      save();
+    },
+    "confirm-section-replace": () => {
+      const section = COURSE_CATALOG.find(item => item.id === state.pendingSectionId);
+      if (!section) return;
+      const conflicts = sectionConflicts(section);
+      const oldSections = new Set(conflicts.map(cell => state.timetable[cell]).filter(item => item?.type === "course").map(item => item.sectionId));
+      oldSections.forEach(removeSection);
+      conflicts.forEach(cell => {
+        if (state.timetable[cell]?.type === "custom") delete state.timetable[cell];
+      });
+      applySection(section);
+      state.pendingSectionId = "";
+      state.activeCell = "";
+      document.querySelector(".modal-backdrop")?.remove();
+      save();
+      showToast(`已取代衝突行程並加入「${section.name}」。`);
+    },
+    "back-course": () => setState({ setupStep: 1 }),
+    "confirm-assessment": () => setState({ setupStep: 4 }),
+    "back-assessment": () => setState({ setupStep: 3 }),
+    "back-availability": () => setState({ setupComplete: false, setupStep: 4 }),
+    "finish-setup": () => setState({ setupComplete: true, route: "today" }),
+    "complete-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: true } : t); showToast("已記錄完成，進度已更新。 "); },
+    "undo-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: false } : t); setState({ tasks: state.tasks }); },
+    "task-not-done": () => { document.body.insertAdjacentHTML("beforeend", taskModal(id)); },
+    "close-modal": () => { state.activeCell = ""; state.pendingSectionId = ""; document.querySelector(".modal-backdrop")?.remove(); save(); },
+    "confirm-replan": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, time: "週六 10:00–11:00" } : t); state.replanCount += 1; document.querySelector(".modal-backdrop")?.remove(); showToast("已移到週六上午，其他任務沒有變動。 "); },
+    "replan-all": () => { state.replanCount += 1; showToast("已重新檢查空堂，目前計畫仍可完成。 "); },
+    "go-today": () => setState({ route: "today" }),
+    "review-assessment": () => setState({ setupComplete: false, setupStep: 3 }),
+    "add-another": () => setState({ setupComplete: false, setupStep: 1 }),
+    "reset-demo": () => { localStorage.removeItem(STORAGE_KEY); state = structuredClone(defaultState); render(); },
+  };
+  actions[action]?.();
 }
 
 document.addEventListener("submit", (event) => {
@@ -791,95 +866,7 @@ document.addEventListener("click", (event) => {
   }
   const actionButton = event.target.closest("[data-action]");
   if (!actionButton) return;
-  const action = actionButton.dataset.action;
-  const id = Number(actionButton.dataset.id);
-  const actions = {
-    "goto-setup-step": () => {
-      goToSetupTarget(actionButton);
-    },
-    "open-cell": () => {
-      state.activeCell = actionButton.dataset.cell;
-      save();
-      render();
-      window.setTimeout(() => document.querySelector("#course-search")?.focus(), 80);
-    },
-    "start-setup": () => setState({ setupStep: 1 }),
-    "profile-next": () => saveProfileAndContinue(),
-    "save-study-settings": () => saveStudySettings(),
-    "accept-imported-data": () => setState({ setupStep: 4, usedImportedData: true }),
-    "sync-school-data": () => showToast("已完成同步，目前資料是最新版本。"),
-    "back-import": () => setState({ setupStep: 1 }),
-    "load-demo": () => setState({ setupComplete: true, setupStep: 5, route: "today" }),
-    "back-onboarding": () => setState({ setupStep: 0 }),
-    "back-profile": () => { setState({ setupStep: 0 }); window.scrollTo(0, 0); },
-    "generate-demo-timetable": () => generateDemoTimetable(),
-    "timetable-next": () => continueFromTimetable(),
-    "save-course-supplement": () => {
-      const { sectionId, supplement } = currentSupplement();
-      if (!sectionId) return;
-      const note = document.querySelector("[data-supplement-note]")?.value || "";
-      state.courseSupplements[sectionId] = { ...supplement, note, updatedAt: new Date().toISOString() };
-      state.supplementUploadError = "";
-      save();
-      showToast(note.trim() || supplement.images.length ? "已儲存這門課的補充資料。" : "這門課目前沒有補充資料。");
-    },
-    "remove-supplement-image": () => {
-      const { sectionId, supplement } = currentSupplement();
-      if (!sectionId) return;
-      const imageIndex = Number(actionButton.dataset.imageIndex);
-      state.courseSupplements[sectionId] = { ...supplement, images: supplement.images.filter((_, index) => index !== imageIndex) };
-      state.supplementUploadError = "";
-      save();
-      renderAtCurrentScroll();
-    },
-    "remove-course": () => {
-      const current = state.timetable[state.activeCell];
-      if (current?.type === "course") removeSection(current.sectionId);
-      else delete state.timetable[state.activeCell];
-      state.activeCell = "";
-      document.querySelector(".modal-backdrop")?.remove();
-      save();
-      render();
-    },
-    "cancel-conflict": () => {
-      state.pendingSectionId = "";
-      state.activeCell = "";
-      document.querySelector(".modal-backdrop")?.remove();
-      save();
-    },
-    "confirm-section-replace": () => {
-      const section = COURSE_CATALOG.find(item => item.id === state.pendingSectionId);
-      if (!section) return;
-      const conflicts = sectionConflicts(section);
-      const oldSections = new Set(conflicts.map(cell => state.timetable[cell]).filter(item => item?.type === "course").map(item => item.sectionId));
-      oldSections.forEach(removeSection);
-      conflicts.forEach(cell => {
-        if (state.timetable[cell]?.type === "custom") delete state.timetable[cell];
-      });
-      applySection(section);
-      state.pendingSectionId = "";
-      state.activeCell = "";
-      document.querySelector(".modal-backdrop")?.remove();
-      save();
-      showToast(`已取代衝突行程並加入「${section.name}」。`);
-    },
-    "back-course": () => setState({ setupStep: 1 }),
-    "confirm-assessment": () => setState({ setupStep: 4 }),
-    "back-assessment": () => setState({ setupStep: 3 }),
-    "back-availability": () => setState({ setupComplete: false, setupStep: 4 }),
-    "finish-setup": () => setState({ setupComplete: true, route: "today" }),
-    "complete-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: true } : t); showToast("已記錄完成，進度已更新。 "); },
-    "undo-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: false } : t); setState({ tasks: state.tasks }); },
-    "task-not-done": () => { document.body.insertAdjacentHTML("beforeend", taskModal(id)); },
-    "close-modal": () => { state.activeCell = ""; state.pendingSectionId = ""; document.querySelector(".modal-backdrop")?.remove(); save(); },
-    "confirm-replan": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, time: "週六 10:00–11:00" } : t); state.replanCount += 1; document.querySelector(".modal-backdrop")?.remove(); showToast("已移到週六上午，其他任務沒有變動。 "); },
-    "replan-all": () => { state.replanCount += 1; showToast("已重新檢查空堂，目前計畫仍可完成。 "); },
-    "go-today": () => setState({ route: "today" }),
-    "review-assessment": () => setState({ setupComplete: false, setupStep: 3 }),
-    "add-another": () => setState({ setupComplete: false, setupStep: 1 }),
-    "reset-demo": () => { localStorage.removeItem(STORAGE_KEY); state = structuredClone(defaultState); render(); },
-  };
-  actions[action]?.();
+  handleActionButton(actionButton);
 });
 
 document.addEventListener("keydown", (event) => {
