@@ -30,11 +30,34 @@ const COURSE_CATALOG = [
   { id: "data-structures-b", subjectId: "data-structures", name: "資料結構", category: "required", code: "CS2001-B", teacher: "陳老師", meetings: [{ day: "wed", periods: ["6", "7"] }, { day: "fri", periods: ["4"] }] },
   { id: "discrete-math-a", subjectId: "discrete-math", name: "離散數學", category: "required", code: "CS2003-A", teacher: "陳老師", meetings: [{ day: "mon", periods: ["5", "6"] }, { day: "wed", periods: ["3"] }] },
   { id: "discrete-math-b", subjectId: "discrete-math", name: "離散數學", category: "required", code: "CS2003-B", teacher: "李老師", meetings: [{ day: "tue", periods: ["7", "8"] }, { day: "thu", periods: ["4"] }] },
+  { id: "ee-circuits-a", subjectId: "ee-circuits", name: "電路學 I", category: "required", code: "EE2001-A", teacher: "陳老師", meetings: [{ day: "mon", periods: ["1", "2"] }, { day: "thu", periods: ["5"] }] },
+  { id: "ee-circuits-b", subjectId: "ee-circuits", name: "電路學 I", category: "required", code: "EE2001-B", teacher: "林老師", meetings: [{ day: "tue", periods: ["3", "4"] }, { day: "fri", periods: ["2"] }] },
+  { id: "ee-circuits-c", subjectId: "ee-circuits", name: "電路學 I", category: "required", code: "EE2001-C", teacher: "吳老師", meetings: [{ day: "wed", periods: ["6", "7"] }, { day: "fri", periods: ["5"] }] },
+  { id: "ee-electronics-a", subjectId: "ee-electronics", name: "電子學 I", category: "required", code: "EE2003-A", teacher: "李老師", meetings: [{ day: "tue", periods: ["1", "2"] }, { day: "thu", periods: ["4"] }] },
+  { id: "ee-electronics-b", subjectId: "ee-electronics", name: "電子學 I", category: "required", code: "EE2003-B", teacher: "王老師", meetings: [{ day: "mon", periods: ["6", "7"] }, { day: "wed", periods: ["3"] }] },
+  { id: "ee-electronics-c", subjectId: "ee-electronics", name: "電子學 I", category: "required", code: "EE2003-C", teacher: "許老師", meetings: [{ day: "wed", periods: ["1", "2"] }, { day: "fri", periods: ["3"] }] },
+  { id: "ee-engineering-math-a", subjectId: "ee-engineering-math", name: "工程數學 I", category: "required", code: "EE2005-A", teacher: "張老師", meetings: [{ day: "mon", periods: ["3", "4"] }, { day: "thu", periods: ["2"] }] },
+  { id: "ee-engineering-math-b", subjectId: "ee-engineering-math", name: "工程數學 I", category: "required", code: "EE2005-B", teacher: "劉老師", meetings: [{ day: "tue", periods: ["6", "7"] }, { day: "fri", periods: ["1"] }] },
+  { id: "ee-engineering-math-c", subjectId: "ee-engineering-math", name: "工程數學 I", category: "required", code: "EE2005-C", teacher: "周老師", meetings: [{ day: "wed", periods: ["3", "4"] }, { day: "fri", periods: ["6"] }] },
+  { id: "ee-electromagnetics-a", subjectId: "ee-electromagnetics", name: "電磁學 I", category: "required", code: "EE3001-A", teacher: "黃老師", meetings: [{ day: "mon", periods: ["5", "6"] }, { day: "wed", periods: ["2"] }] },
+  { id: "ee-electromagnetics-b", subjectId: "ee-electromagnetics", name: "電磁學 I", category: "required", code: "EE3001-B", teacher: "鄭老師", meetings: [{ day: "tue", periods: ["8", "9"] }, { day: "thu", periods: ["3"] }] },
+  { id: "ee-electromagnetics-c", subjectId: "ee-electromagnetics", name: "電磁學 I", category: "required", code: "EE3001-C", teacher: "蔡老師", meetings: [{ day: "wed", periods: ["5", "6"] }, { day: "fri", periods: ["4"] }] },
+  { id: "ee-signals-a", subjectId: "ee-signals", name: "訊號與系統", category: "required", code: "EE3003-A", teacher: "楊老師", meetings: [{ day: "tue", periods: ["5", "6"] }, { day: "thu", periods: ["1"] }] },
+  { id: "ee-signals-b", subjectId: "ee-signals", name: "訊號與系統", category: "required", code: "EE3003-B", teacher: "何老師", meetings: [{ day: "mon", periods: ["8", "9"] }, { day: "wed", periods: ["4"] }] },
+  { id: "ee-signals-c", subjectId: "ee-signals", name: "訊號與系統", category: "required", code: "EE3003-C", teacher: "郭老師", meetings: [{ day: "thu", periods: ["6", "7"] }, { day: "fri", periods: ["3"] }] },
   { id: "economics", subjectId: "economics", name: "經濟學", category: "general", code: "GE1001", teacher: "張李治華老師", meetings: [{ day: "fri", periods: ["6", "7"] }] },
   { id: "generative-ai", subjectId: "generative-ai", name: "生成式 AI", category: "general", code: "GE2001", teacher: "韓伯維老師", meetings: [{ day: "tue", periods: ["8", "9", "A"] }] },
+  { id: "psychology", subjectId: "psychology", name: "心理學概論", category: "general", code: "GE2101", teacher: "葉老師", meetings: [{ day: "mon", periods: ["6", "7"] }] },
+  { id: "music-appreciation", subjectId: "music-appreciation", name: "音樂欣賞", category: "general", code: "GE2103", teacher: "蘇老師", meetings: [{ day: "wed", periods: ["8", "9"] }] },
+  { id: "technology-society", subjectId: "technology-society", name: "科技與社會", category: "general", code: "GE2201", teacher: "杜老師", meetings: [{ day: "thu", periods: ["5", "6"] }] },
+  { id: "sustainability", subjectId: "sustainability", name: "環境永續", category: "general", code: "GE2203", teacher: "賴老師", meetings: [{ day: "tue", periods: ["3", "4"] }] },
+  { id: "everyday-law", subjectId: "everyday-law", name: "日常生活法律", category: "general", code: "GE2301", teacher: "范老師", meetings: [{ day: "fri", periods: ["3", "4"] }] },
+  { id: "creative-design", subjectId: "creative-design", name: "創意思考與設計", category: "general", code: "GE2303", teacher: "游老師", meetings: [{ day: "mon", periods: ["8", "9"] }] },
+  { id: "astronomy", subjectId: "astronomy", name: "天文學導論", category: "general", code: "GE2401", teacher: "孫老師", meetings: [{ day: "thu", periods: ["8", "9"] }] },
+  { id: "global-culture", subjectId: "global-culture", name: "全球文化與溝通", category: "general", code: "GE2403", teacher: "羅老師", meetings: [{ day: "wed", periods: ["5", "6"] }] },
 ];
 
-const DEMO_SECTION_IDS = [
+const FALLBACK_DEMO_SECTION_IDS = [
   "calculus-a",
   "physics-a",
   "intro-cs-a",
@@ -81,6 +104,7 @@ const defaultState = {
   courseSupplements: {},
   supplementCourseId: "",
   supplementUploadError: "",
+  lastDemoSignature: "",
   course: {
     name: "資料結構",
     teacher: "王老師",
@@ -213,7 +237,7 @@ function timetablePage() {
     <div class="row-between timetable-heading"><div><div class="eyebrow">115-1 學期</div><h1 class="page-title">建立你的課表</h1></div><span class="status ${count ? "confirmed" : ""}">${count} 格</span></div>
     <p class="muted schedule-help">08:00–24:00 都能安排。點選格子加入課程或其他行程。</p>
     <div class="timetable-workspace"><div class="schedule-wrap" aria-label="每週課表">${header}${rows}</div>
-    <aside class="timetable-actions"><div class="desktop-action-summary"><strong>課表設定</strong><span>確認課程與固定行程後，再設定各科讀書條件。</span></div><button class="btn primary block" data-action="timetable-next">確認課表，繼續</button><button class="btn secondary block" data-action="back-profile">返回基本資料</button><div class="demo-generator"><span>開發測試捷徑</span><button class="btn demo block" data-action="generate-demo-timetable">一鍵生成示範課表</button><small>自動加入 5 門必修、2 門通識、彈鋼琴與打籃球，且不會撞堂。</small></div></aside></div>
+    <aside class="timetable-actions"><div class="desktop-action-summary"><strong>課表設定</strong><span>確認課程與固定行程後，再設定各科讀書條件。</span></div><button class="btn primary block" data-action="timetable-next">確認課表，繼續</button><button class="btn secondary block" data-action="back-profile">返回基本資料</button><div class="demo-generator"><span>開發測試捷徑</span><button class="btn demo block" data-action="generate-demo-timetable">一鍵隨機生成示範課表</button><small>每次隨機加入 5 門必修、2 門通識與 2 個生活行程，並自動避開撞堂。</small></div></aside></div>
   </section>`, "填寫課表");
 }
 
@@ -423,16 +447,66 @@ function saveProfileAndContinue(form = document.querySelector("#profile-form")) 
   window.scrollTo(0, 0);
 }
 
+function shuffled(items) {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
+
+function randomDemoSections() {
+  const requiredGroups = Object.values(COURSE_CATALOG.filter(course => course.category === "required").reduce((groups, course) => {
+    (groups[course.subjectId] ||= []).push(course);
+    return groups;
+  }, {}));
+  const generalCourses = COURSE_CATALOG.filter(course => course.category === "general");
+
+  for (let attempt = 0; attempt < 160; attempt += 1) {
+    const occupied = new Set();
+    const selected = [];
+    for (const group of shuffled(requiredGroups)) {
+      const candidate = shuffled(group).find(section => sectionCells(section).every(cell => !occupied.has(cell)));
+      if (!candidate) continue;
+      selected.push(candidate);
+      sectionCells(candidate).forEach(cell => occupied.add(cell));
+      if (selected.length === 5) break;
+    }
+    if (selected.length !== 5) continue;
+
+    let generalCount = 0;
+    for (const course of shuffled(generalCourses)) {
+      if (sectionCells(course).some(cell => occupied.has(cell))) continue;
+      selected.push(course);
+      sectionCells(course).forEach(cell => occupied.add(cell));
+      generalCount += 1;
+      if (generalCount === 2) break;
+    }
+    if (generalCount !== 2) continue;
+
+    const signature = selected.map(section => section.id).sort().join("|");
+    if (signature === state.lastDemoSignature) continue;
+    return { selected, signature };
+  }
+
+  const selected = FALLBACK_DEMO_SECTION_IDS.map(id => COURSE_CATALOG.find(course => course.id === id)).filter(Boolean);
+  return { selected, signature: selected.map(section => section.id).sort().join("|") };
+}
+
 function generateDemoTimetable() {
+  const { selected, signature } = randomDemoSections();
   state.timetable = {};
-  DEMO_SECTION_IDS.forEach(sectionId => {
-    const section = COURSE_CATALOG.find(item => item.id === sectionId);
-    if (section) applySection(section);
-  });
-  state.timetable["sat-5"] = { type: "custom", title: "彈鋼琴" };
-  state.timetable["sat-7"] = { type: "custom", title: "打籃球" };
+  selected.forEach(applySection);
+  const activityCells = shuffled([
+    "mon-A", "mon-B", "tue-A", "tue-B", "wed-A", "wed-B", "thu-A", "thu-B", "fri-A", "fri-B",
+    "sat-3", "sat-5", "sat-6", "sat-7", "sat-8",
+  ]).filter(cell => !state.timetable[cell]).slice(0, 2);
+  state.timetable[activityCells[0] || "sat-5"] = { type: "custom", title: "彈鋼琴" };
+  state.timetable[activityCells[1] || "sat-7"] = { type: "custom", title: "打籃球" };
+  state.lastDemoSignature = signature;
   save();
-  showToast("已生成無衝堂示範課表：5 門必修、2 門通識與 2 個行程。");
+  showToast("已隨機生成無衝堂課表：5 門必修、2 門通識與 2 個生活行程。");
 }
 
 function continueFromTimetable() {
@@ -639,7 +713,6 @@ function handleActionButton(actionButton) {
       state.activeCell = actionButton.dataset.cell;
       save();
       render();
-      window.setTimeout(() => document.querySelector("#course-search")?.focus(), 80);
     },
     "start-setup": () => setState({ setupStep: 1 }),
     "profile-next": () => saveProfileAndContinue(),
