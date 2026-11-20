@@ -45,6 +45,15 @@
       <div id="calendar-grid" class="calendar-scroll" tabindex="0" aria-label="週行事曆時段"></div>
     </section>
     <section id="result" hidden aria-label="規劃成果">
+      <section id="decision" class="input-card" hidden aria-labelledby="decision-heading">
+        <h2 id="decision-heading">時間不足</h2>
+        <p id="decision-message"></p>
+        <div id="decision-sections"></div>
+        <div class="actions">
+          <button type="button" data-action="reschedule">我已調整學習設定，重新排程</button>
+          <button type="button" data-action="accept_pending">接受，低優先度任務留在待排</button>
+        </div>
+      </section>
       <div class="summary">
         <h2>排程理由</h2>
         <div id="summary"></div>

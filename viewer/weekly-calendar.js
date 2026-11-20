@@ -138,7 +138,7 @@ export function setCalendarCourses(value) {
 
 export function setCalendarPlan(value) {
   plan = value;
-  if (value) start = monday(value.schedule.scope.from);
+  if (value) start = monday((value.scope ?? value.schedule.scope).from);
   render();
 }
 

@@ -2,23 +2,19 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import { check, filePlanningSource, sqlitePlanningSource } from './data.ts';
+import type { PlanningSource } from './data.ts';
 import { GeminiLlmService, GeminiUnavailable } from './llm.ts';
 import { errorStatus, RequestError } from './errors.ts';
-import { generateInitialPlan } from './planner.ts';
-import { checkpointRun } from './checkpoints.ts';
+import { generateInitialPlan, planFromDraft } from './planner.ts';
+import type { FinalPlan } from './planner.ts';
+import { checkpointRun, loadDraft } from './checkpoints.ts';
 import { planHistory } from './plan-history.ts';
 import { planningInputView } from './planning-input-view.ts';
 import type { Scope } from './availability.ts';
 
 const viewer = (name: string) => new URL(`../viewer/${name}`, import.meta.url);
-const db = process.env.PLANNING_DB_PATH ? new DatabaseSync(process.env.PLANNING_DB_PATH, { readOnly: true }) : null;
-const fixtureDir = new URL('../test/data/', import.meta.url);
-const source = db ? sqlitePlanningSource(db) : filePlanningSource({
-  courses: (await readdir(fixtureDir)).filter(name => /^2_course\..+\.json$/.test(name))
-    .sort().map(name => new URL(name, fixtureDir)),
-  userState: new URL('3_user_state.json', fixtureDir),
-});
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/app.css', ['app.css', 'text/css; charset=utf-8']],
@@ -45,113 +41,159 @@ async function requestBody(request: IncomingMessage) {
     check(body.length <= 16_384, '請求過大');
   }
   try {
-    return JSON.parse(body) as { user_id?: string; scope?: Scope };
+    return JSON.parse(body) as { user_id?: string; scope?: Scope; action?: string };
   } catch (error) {
     throw new RequestError('請求不是有效的 JSON', { cause: error });
   }
 }
 
-const server = createServer(async (request, response) => {
-  const host = request.headers.host ?? '';
-  if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)
-    || (request.headers.origin && request.headers.origin !== `http://${host}`)) {
-    json(response, 403, { error: '只接受本機同源請求。' });
-    return;
-  }
-  const path = request.url?.split('?')[0] ?? '';
-  try {
-    const asset = assets.get(path);
-    if (request.method === 'GET' && asset) {
-      const [name, contentType] = asset;
-      const body = await readFile(viewer(name));
-      response.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
-      response.end(body);
-      return;
-    }
-    if (request.method === 'POST' && path === '/api/plans') {
-      const body = await requestBody(request);
-      check(typeof body?.user_id === 'string' && body.user_id.trim() && body.scope, '需要使用者 ID 和規劃範圍');
-      if (!process.env.GEMINI_API_KEY?.trim()) {
-        json(response, 503, { error: '請在 .env 設定 GEMINI_API_KEY，並重新啟動本機伺服器。' });
-        return;
-      }
-      const id = body.user_id;
-      if (progress.has(id)) {
-        json(response, 409, { error: '此帳號已有規劃進行中。' });
-        return;
-      }
-      let stage = '讀取輸入';
-      const log = (message: string) => console.info(JSON.stringify({ time: new Date().toISOString(), user: id, stage, message }));
-      log(`開始規劃 ${body.scope.from} 至 ${body.scope.to}`);
-      progress.set(id, stage);
-      try {
-        const llm = new GeminiLlmService(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL?.trim() || undefined,
-          message => {
-            progress.set(id, `${stage} · ${message}`);
-            log(message);
-          });
-        const input = await source.load(id);
-        const run = checkpointRun(checkpoints, [5, llm.model, body.scope, input], message => {
-          stage = message;
-          progress.set(id, stage);
-          log('開始');
-        }, log);
-        const result = await generateInitialPlan(input, body.scope, llm, new Date(), run);
-        checkpoints.exec('BEGIN IMMEDIATE');
-        try {
-          history.save(result, run.completedSteps());
-          run.finish();
-          checkpoints.exec('COMMIT');
-        } catch (error) {
-          checkpoints.exec('ROLLBACK');
-          throw error;
-        }
-        log(`規劃完成：${result.tasks.length} 項任務、${result.schedule_blocks.length} 個時段、${result.tasks.filter(task => task.status === 'pending').length} 項待排`);
-        json(response, 200, result);
-      } catch (error) {
-        log(`規劃中斷：${(error as Error).message}`);
-        throw error;
-      } finally {
-        progress.delete(id);
-      }
-      return;
-    }
-    if (request.method === 'GET' && path === '/api/planning-progress') {
-      const id = new URLSearchParams(request.url?.split('?')[1]).get('user_id') ?? '';
-      json(response, 200, { message: progress.get(id) ?? null });
-      return;
-    }
-    if (request.method === 'GET' && (path === '/api/plans' || path.startsWith('/api/plans/'))) {
-      const id = new URLSearchParams(request.url?.split('?')[1]).get('user_id')?.trim();
-      check(id, '請輸入使用者 ID');
-      if (path === '/api/plans') json(response, 200, history.list(id));
-      else if (path === '/api/plans/latest') json(response, 200, history.read(id));
-      else {
-        const route = path.slice('/api/plans/'.length);
-        const result = route.endsWith('/stages')
-          ? history.stages(id, route.slice(0, -'/stages'.length)) : history.read(id, route);
-        json(response, result ? 200 : 404, result ?? { error: '找不到此使用者的計畫' });
-      }
-      return;
-    }
-    if (request.method === 'GET' && path === '/api/planning-input') {
-      const userId = new URLSearchParams(request.url?.split('?')[1]).get('user_id')?.trim();
-      check(userId, '請輸入使用者 ID');
-      json(response, 200, planningInputView(await source.load(userId)));
-      return;
-    }
-    json(response, 404, { error: '找不到頁面' });
-  } catch (error) {
-    if (error instanceof GeminiUnavailable) response.setHeader('Retry-After', error.retryAfter);
-    json(response, errorStatus(error), { error: error instanceof Error ? error.message : '伺服器錯誤' });
-  }
-});
+export function createPlanningServer(source: PlanningSource, checkpoints: DatabaseSync) {
+  const progress = new Map<string, string>();
+  const history = planHistory(checkpoints);
 
-const progress = new Map<string, string>();
-const checkpoints = new DatabaseSync('.planning-checkpoints.sqlite');
-const history = planHistory(checkpoints);
-const port = Number(process.env.PORT ?? 3000);
-server.listen(port, '127.0.0.1', () => {
-  console.log(`http://127.0.0.1:${(server.address() as { port: number }).port}/`);
-});
-server.on('close', () => { db?.close(); checkpoints.close(); });
+  function saveFinal(plan: FinalPlan, run: ReturnType<typeof checkpointRun>) {
+    checkpoints.exec('BEGIN IMMEDIATE');
+    try {
+      history.save(plan, run.completedSteps());
+      run.finish();
+      checkpoints.exec('COMMIT');
+    } catch (error) {
+      checkpoints.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  return createServer(async (request, response) => {
+    const host = request.headers.host ?? '';
+    if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)
+      || (request.headers.origin && request.headers.origin !== `http://${host}`)) {
+      json(response, 403, { error: '只接受本機同源請求。' });
+      return;
+    }
+    const path = request.url?.split('?')[0] ?? '';
+    try {
+      const asset = assets.get(path);
+      if (request.method === 'GET' && asset) {
+        const [name, contentType] = asset;
+        const body = await readFile(viewer(name));
+        response.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+        response.end(body);
+        return;
+      }
+      if (request.method === 'POST' && path === '/api/plans') {
+        const body = await requestBody(request);
+        check(typeof body?.user_id === 'string' && body.user_id.trim() && body.scope, '需要使用者 ID 和規劃範圍');
+        if (!process.env.GEMINI_API_KEY?.trim()) {
+          json(response, 503, { error: '請在 .env 設定 GEMINI_API_KEY，並重新啟動本機伺服器。' });
+          return;
+        }
+        const id = body.user_id;
+        if (progress.has(id)) {
+          json(response, 409, { error: '此帳號已有規劃進行中。' });
+          return;
+        }
+        let stage = '讀取輸入';
+        const log = (message: string) => console.info(JSON.stringify({ time: new Date().toISOString(), user: id, stage, message }));
+        log(`開始規劃 ${body.scope.from} 至 ${body.scope.to}`);
+        progress.set(id, stage);
+        try {
+          const llm = new GeminiLlmService(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL?.trim() || undefined,
+            message => {
+              progress.set(id, `${stage} · ${message}`);
+              log(message);
+            });
+          const input = await source.load(id);
+          const run = checkpointRun(checkpoints, [5, llm.model, body.scope, input], message => {
+            stage = message;
+            progress.set(id, stage);
+            log('開始');
+          }, log);
+          const result = await generateInitialPlan(input, body.scope, llm, new Date(), run);
+          if ('schedule' in result) {
+            saveFinal(result, run);
+            log(`規劃完成：${result.tasks.length} 項任務、${result.schedule_blocks.length} 個時段`);
+          } else {
+            log(result.message);
+          }
+          json(response, 200, result);
+        } catch (error) {
+          log(`規劃中斷：${(error as Error).message}`);
+          throw error;
+        } finally {
+          progress.delete(id);
+        }
+        return;
+      }
+      const decision = /^\/api\/plans\/drafts\/([^/]+)\/decision$/.exec(path);
+      if (request.method === 'POST' && decision) {
+        const body = await requestBody(request);
+        const id = body?.user_id;
+        check(typeof id === 'string' && id.trim(), '需要使用者 ID');
+        check(body.action === 'reschedule' || body.action === 'accept_pending', '無效的草稿決定');
+        const saved = loadDraft(checkpoints, id, decision[1]);
+        if (!saved) {
+          json(response, 404, { error: '找不到此使用者的草稿' });
+          return;
+        }
+        if (progress.has(id)) {
+          json(response, 409, { error: '此帳號已有規劃進行中。' });
+          return;
+        }
+        progress.set(id, '讀取目前設定並重新排程');
+        try {
+          const result = planFromDraft(await source.load(id), saved.draft, body.action);
+          if ('schedule' in result) saveFinal(result, saved.run);
+          json(response, 200, result);
+        } finally {
+          progress.delete(id);
+        }
+        return;
+      }
+      if (request.method === 'GET' && path === '/api/planning-progress') {
+        const id = new URLSearchParams(request.url?.split('?')[1]).get('user_id') ?? '';
+        json(response, 200, { message: progress.get(id) ?? null });
+        return;
+      }
+      if (request.method === 'GET' && (path === '/api/plans' || path.startsWith('/api/plans/'))) {
+        const id = new URLSearchParams(request.url?.split('?')[1]).get('user_id')?.trim();
+        check(id, '請輸入使用者 ID');
+        if (path === '/api/plans') json(response, 200, history.list(id));
+        else if (path === '/api/plans/latest') json(response, 200, history.read(id));
+        else {
+          const route = path.slice('/api/plans/'.length);
+          const result = route.endsWith('/stages')
+            ? history.stages(id, route.slice(0, -'/stages'.length)) : history.read(id, route);
+          json(response, result ? 200 : 404, result ?? { error: '找不到此使用者的計畫' });
+        }
+        return;
+      }
+      if (request.method === 'GET' && path === '/api/planning-input') {
+        const userId = new URLSearchParams(request.url?.split('?')[1]).get('user_id')?.trim();
+        check(userId, '請輸入使用者 ID');
+        json(response, 200, planningInputView(await source.load(userId)));
+        return;
+      }
+      json(response, 404, { error: '找不到頁面' });
+    } catch (error) {
+      if (error instanceof GeminiUnavailable) response.setHeader('Retry-After', error.retryAfter);
+      json(response, errorStatus(error), { error: error instanceof Error ? error.message : '伺服器錯誤' });
+    }
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const db = process.env.PLANNING_DB_PATH ? new DatabaseSync(process.env.PLANNING_DB_PATH, { readOnly: true }) : null;
+  const fixtureDir = new URL('../test/data/', import.meta.url);
+  const source = db ? sqlitePlanningSource(db) : filePlanningSource({
+    courses: (await readdir(fixtureDir)).filter(name => /^2_course\..+\.json$/.test(name))
+      .sort().map(name => new URL(name, fixtureDir)),
+    userState: new URL('3_user_state.json', fixtureDir),
+  });
+  const checkpoints = new DatabaseSync('.planning-checkpoints.sqlite');
+  const server = createPlanningServer(source, checkpoints);
+  const port = Number(process.env.PORT ?? 3000);
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`http://127.0.0.1:${(server.address() as { port: number }).port}/`);
+  });
+  server.on('close', () => { db?.close(); checkpoints.close(); });
+}

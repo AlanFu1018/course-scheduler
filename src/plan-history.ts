@@ -1,7 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { generateInitialPlan } from './planner.ts';
-
-type Result = Awaited<ReturnType<typeof generateInitialPlan>>;
+import type { FinalPlan } from './planner.ts';
 
 export function planHistory(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS saved_plans (
@@ -19,13 +17,13 @@ export function planHistory(db: DatabaseSync) {
       FROM latest_plans`);
   }
   return {
-    save(result: Result, steps: { step: string; data: string }[]) {
+    save(result: FinalPlan, steps: { step: string; data: string }[]) {
       const {plan_id, user_id, created_at} = result.schedule;
       insert.run(plan_id, user_id, created_at, JSON.stringify(result));
       const saveStep = db.prepare('INSERT INTO saved_plan_steps(plan_id,step,data) VALUES(?,?,?)');
       for (const { step, data } of steps) saveStep.run(plan_id, step, data);
     },
-    read(userId: string, planId?: string): Result | null {
+    read(userId: string, planId?: string): FinalPlan | null {
       const row = planId === undefined
         ? db.prepare('SELECT data FROM saved_plans WHERE user_id=? ORDER BY rowid DESC LIMIT 1').get(userId)
         : db.prepare('SELECT data FROM saved_plans WHERE user_id=? AND plan_id=?').get(userId, planId);

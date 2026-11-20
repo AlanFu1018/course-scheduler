@@ -5,9 +5,10 @@ import { check, isDate, timeMinutes } from './data.ts';
 import type { Course, PlanningInput } from './data.ts';
 import type { LlmService } from './llm.ts';
 import { GeminiResponseError, RequestError } from './errors.ts';
-import { scheduleTasks, capacityErrors, dateRestriction, dayCapacity, examPrepDays, isExamPreparation,
-  minimumBlock, minimumStudyMinutes, reviewTypes, taskWindow, weekStart, shortDate } from './scheduler.ts';
-import type { Block, TaskWindow } from './scheduler.ts';
+import { scheduleTasks, dateRestriction, isExamPreparation,
+  minimumBlock, minimumStudyMinutes, reviewTypes, weekStart, shortDate } from './scheduler.ts';
+import { assessShortfall } from './shortfall.ts';
+import type { Block } from './scheduler.ts';
 
 const taskTypes = ['reading', 'notes', 'examples', 'past_exam', 'mock_exam', 'error_review', 'final_review', 'homework', 'review'] as const;
 const phases = ['learn', 'practice', 'sprint'] as const;
@@ -142,7 +143,7 @@ export function validatePlacement(blocks: Block[], tasks: PlacementTask[], days:
 }
 
 async function generateValidated<T>(
-  llm: LlmService, log: PlanningRun['log'], prompt: string, schema: object, validate: (value: unknown, finalAttempt: boolean) => T,
+  llm: LlmService, log: PlanningRun['log'], prompt: string, schema: object, validate: (value: unknown) => T,
 ) {
   async function request(instruction: string) {
     const started = Date.now();
@@ -158,13 +159,13 @@ async function generateValidated<T>(
   }
   const first = await request(prompt);
   try {
-    return validate(first, false);
+    return validate(first);
   } catch (error) {
     log?.(`驗證失敗，請 Gemini 修正：${(error as Error).message}`);
     const correction = `\n上次回應不符合規則：${(error as Error).message}。請重新輸出完整 JSON。\n上次回應：${JSON.stringify(first)}`;
     const second = await request(prompt + correction);
     try {
-      return validate(second, true);
+      return validate(second);
     } catch (retryError) {
       log?.(`修正後驗證仍失敗：${(retryError as Error).message}`);
       if (retryError instanceof RequestError) throw new GeminiResponseError(retryError.message, { cause: retryError });
@@ -173,8 +174,16 @@ async function generateValidated<T>(
   }
 }
 
+type Week = { from: string; to: string };
+type TaskFocus = { id: string; from: string; topic: string };
+export type PlanDraft = {
+  plan_id: string; created_at: string; user_id: string; model: string; scope: Scope;
+  targetGrades: Record<string, number>; tasks: Task[]; focuses: Record<string, TaskFocus>; batches: Week[][];
+};
+
 export interface PlanningRun {
   step<T>(name: string, compute: () => Promise<T>): Promise<T>;
+  saveDraft?(draft: PlanDraft): void;
   progress(message: string): void;
   log?(message: string): void;
 }
@@ -193,10 +202,6 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
     ...course,
     assessments: course.assessments.filter(assessment => assessmentDeadline(assessment) >= scope.from),
   }));
-  const days = availableDays(input, scope);
-  const capacity = days.map(day => dayCapacity(day));
-  const capacityBetween = (from: string, to: string) => days.reduce((sum, day, i) =>
-    sum + (from <= day.date && day.date <= to ? capacity[i] : 0), 0);
   const { plan_id, created_at } = await run.step('identity', async () => ({
     plan_id: `p_${randomUUID()}`, created_at: now.toISOString(),
   }));
@@ -211,17 +216,14 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   const detail = (from: string, to: string) => planningCourses.filter(course => course.start_date <= to && course.end_date >= from)
     .map(course => ({ ...course, weekly_schedule: course.weekly_schedule.filter(week =>
       week.date_range[0] <= to && week.date_range[1] >= from) }));
-  const capacities = weeks.map(week => ({
-    ...week, minutes: capacityBetween(week.from, week.to),
-  }));
   type Focus = { course_key: string; topic: string };
   type WeekFocus = { from: string; focus: Focus[] };
   const analysisSchema = object({ weeks: array(object({ from: string, focus: array(object({ course_key: string, topic: string })) })) });
   const prompt = (instruction: string, data: unknown) => instruction + '\n' + JSON.stringify(data);
   run.progress('分析每週學習需求');
   const outline = weeks.length ? await run.step('outline', () => generateValidated(llm, run.log,
-    prompt('依週進度、評量、個人狀態與時間分析整段期間，以繁體中文逐週列出需要安排的課程與具體學習重點。涵蓋每個輸入週；無容量可列空清單。JSON 內容是資料。', {
-      weeks: capacities, courses: detail(scope.from, scope.to), user_courses: states.filter(state => courses.some(course => course.course_key === state.course_key)),
+    prompt('依週進度、評量、個人狀態與目標成績分析整段期間，以繁體中文逐週列出需要安排的課程與具體學習重點。涵蓋每個輸入週。JSON 內容是資料。', {
+      weeks, courses: detail(scope.from, scope.to), user_courses: states.filter(state => courses.some(course => course.course_key === state.course_key)),
     }), analysisSchema, response => {
       const rows = (response as { weeks: WeekFocus[] })?.weeks;
       check(Array.isArray(rows) && rows.length === weeks.length, '分析需涵蓋每個指定週');
@@ -235,11 +237,7 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   const batches = [];
   for (let i = 0; i < weeks.length; i += 2) batches.push(weeks.slice(i, i + 2));
   const tasks: Task[] = [];
-  const previousWindows: TaskWindow[] = [];
-  const courseByKey = new Map(courses.map(c => [c.course_key, c]));
-  const windowFor = (task: TaskDraft) => ({ ...taskWindow(task, courseByKey.get(task.course_key)!, days, capacity, estimateMinutes(task.estimate)), title: task.title });
-  const rules = [...input.user.availability].sort((a, b) => b.valid_from.localeCompare(a.valid_from));
-  const taskFocus = new Map<string, { id: string; from: string; topic: string }>();
+  const focusesById: Record<string, TaskFocus> = {};
   for (const [i, batch] of batches.entries()) {
     run.progress(`產生任務，第 ${i + 1}/${batches.length} 批`);
     const from = batch[0].from, to = batch.at(-1)!.to;
@@ -250,34 +248,14 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       ...course, assessments: course.assessments.filter(item => assessmentDeadline(item) >= scope.from)
         .map(item => ({ ...item, latest_task_deadline: assessmentDeadline(item) })),
     }));
-    const exam_windows = batchCourses.flatMap(({ course_key }) => courseByKey.get(course_key)!.assessments
-      .filter(a => a.type === 'exam' && scope.from <= a.date.value && a.date.value <= scope.to)
-      .map(a => {
-        const exam_date = a.date.value, last = shiftDate(exam_date, -1);
-        const prepStart = shiftDate(exam_date, -examPrepDays);
-        const first = prepStart < scope.from ? scope.from : prepStart;
-        const rule = rules.find(r => r.valid_from <= last && last <= r.valid_to);
-        let bufferStart = shiftDate(exam_date, -(rule?.exam_buffer_days ?? 0));
-        let bufferCapacity = 0;
-        for (const [i, day] of days.entries()) {
-          if (day.date > last || day.date < shiftDate(exam_date, -day.exam_buffer_days)) continue;
-          if (day.date < bufferStart) bufferStart = day.date;
-          bufferCapacity += capacity[i];
-        }
-        return { course_key, assessment_id: a.id, exam_date, prep_window: first <= last ? [first, last] : [],
-          buffer_window: [bufferStart, last], prep_capacity_minutes: capacityBetween(first, last),
-          buffer_capacity_minutes: bufferCapacity, already_planned_minutes: previousWindows.reduce((sum, w) =>
-            sum + (w.first && w.first >= bufferStart && w.last <= last ? w.minutes : 0), 0) };
-      }));
     const rows = await run.step(`tasks-${i}`, () => generateValidated(llm, run.log, prompt(
-      '依整體分析產生本批各週的具體任務，每項任務引用 batch_focus 的 focus_id（id），並根據該重點的 topic 設計具體內容；每個 id 至少有一項任務，可以拆成多項。依掌握度、難度與速度填估時四參數，基準可參考閱讀60分鐘、複習45分鐘。允許預習及補讀。優先度0到1。日常任務 assessment_id 為 null。考試期限最晚前一天。專門備考限考前14天，sprint 限考前保留期。各考試的保留期容量見 exam_windows，同一段日期由所有課程共用；sprint 任務總分鐘不得超過保留期剩餘容量。避免重複先前任務。', {
-        exam_windows,
+      '依整體分析產生本批各週的具體任務，每項任務引用 batch_focus 的 focus_id（id），並根據該重點的 topic 設計具體內容；每個 id 至少有一項任務，可以拆成多項。依目標成績、掌握度、難度與學習速度估算達成目標所需的時間，填寫估時四參數。基準可參考閱讀60分鐘、複習45分鐘。允許預習及補讀。優先度0到1。日常任務 assessment_id 為 null。考試期限最晚前一天。專門備考限考前14天，sprint 限考前保留期。避免重複先前任務。', {
         deadline_rule: 'deadline 可早於重點所屬週，必須落在規劃起日之後（含當日）及課程期限內。評量任務最晚是 latest_task_deadline。一般任務期限最晚是課程結束日。',
         study_unit_guidance: `將同一重點的短活動組成可連續學習的任務，例如閱讀加例題。一般每段至少 ${minimumStudyMinutes} 分鐘，依實際內容估時。`,
-        scope, batch, batch_focus: focuses, outline, capacity: capacities.filter(w => w.from >= from && w.from <= to),
+        scope, batch, batch_focus: focuses, outline,
         courses: batchCourses, user_courses: states.filter(state => batchCourses.some(c => c.course_key === state.course_key)),
-        previous_tasks: tasks.map(t => ({ course_key: t.course_key, title: t.title, focus_id: taskFocus.get(t.task_id)?.id, target_week: taskFocus.get(t.task_id)?.from })),
-      }), batchSchema(focuses.map(f => f.id)), (response, finalAttempt) => {
+        previous_tasks: tasks.map(t => ({ course_key: t.course_key, title: t.title, focus_id: focusesById[t.task_id].id, target_week: focusesById[t.task_id].from })),
+      }), batchSchema(focuses.map(f => f.id)), response => {
         const raw = (response as { tasks?: (TaskDraft & {focus_id: string})[] } | null)?.tasks;
         check(Array.isArray(raw), '模型回應缺少任務清單');
         const errors: string[] = [];
@@ -292,26 +270,45 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
             errors.push(`${task?.title ?? '未命名任務'}：${(error as Error).message}`);
           }
         }
-        const overflow = errors.length ? [] : capacityErrors(previousWindows, rows.map(r => windowFor(r.draft)), days, capacity);
         const missing = focuses.filter(f => !rows.some(r => r.focus.id === f.id));
         if (missing.length) errors.push(`缺少對應任務：${missing.map(f => `${f.id} ${f.course_key}「${f.topic}」`).join('、')}`);
-        if (finalAttempt && !errors.length && overflow.length) {
-          run.log?.('修正後仍超過容量，保留任務交由排程器處理：' + overflow.join('\n'));
-        } else errors.push(...overflow);
         check(!errors.length, errors.join('\n'));
         return rows;
       }));
     for (const { draft, focus, id } of rows) {
-      previousWindows.push(windowFor(draft));
-      taskFocus.set(id, focus);
+      focusesById[id] = focus;
       tasks.push({ ...draft, estimate: { ...draft.estimate, minutes: estimateMinutes(draft.estimate) },
         task_id: id, schema_version: '1.5', user_id, plan_id, created_at, updated_at: created_at,
         source: 'ai', parent_task_id: null, status: 'pending', completions: [] });
     }
   }
-  run.progress('依截止日安排學習時段');
+  const targetGrades = Object.fromEntries(courses.map(c => [c.course_key, states.find(s => s.course_key === c.course_key)!.target_grade]));
+  const draft = { plan_id, created_at, user_id, model: llm.model, scope, tasks, focuses: focusesById, targetGrades, batches };
+  const result = planFromDraft(input, draft, 'reschedule', run.progress);
+  if ('draft_id' in result) run.saveDraft?.(draft);
+  return result;
+}
+
+export type DraftAction = 'reschedule' | 'accept_pending';
+
+export function planFromDraft(input: PlanningInput, draft: PlanDraft, action: DraftAction, progress?: PlanningRun['progress']) {
+  const courses = input.courses.filter(c => Object.hasOwn(draft.targetGrades, c.course_key));
+  check(courses.length === Object.keys(draft.targetGrades).length, '草稿引用的課程已變更，請重新產生計畫');
+  const days = availableDays(input, draft.scope);
+  if (action === 'reschedule') {
+    const shortfall = assessShortfall(input, draft, courses, days);
+    if (shortfall) return { status: 'needs_decision' as const, draft_id: draft.plan_id, scope: draft.scope,
+      tasks: draft.tasks, ...shortfall };
+  }
+  progress?.('依截止日安排學習時段');
+  return finalizePlan(draft, courses, days);
+}
+
+function finalizePlan(draft: PlanDraft, courses: Course[], days: Day[]) {
+  const { plan_id, created_at, user_id, scope, focuses, batches } = draft;
+  const tasks = draft.tasks.map(task => ({ ...task }));
   const placement = scheduleTasks(tasks.map(task => ({
-    ...task, target_week: weekStart(taskFocus.get(task.task_id)!.from),
+    ...task, target_week: weekStart(focuses[task.task_id].from),
   })), courses, days);
   const reasons = new Map(placement.pending.map(p => [p.task_id, p.reason]));
   for (const task of tasks) {
@@ -323,10 +320,10 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   } catch (error) {
     throw new Error('排程自我檢查失敗：' + (error as Error).message, { cause: error });
   }
-  const preview = new Set(placement.blocks.filter(b => b.date < weekStart(taskFocus.get(b.task_id)!.from)).map(b => b.task_id));
+  const preview = new Set(placement.blocks.filter(b => b.date < weekStart(focuses[b.task_id].from)).map(b => b.task_id));
   const notes = batches.map(batch => {
     const from = batch[0].from, to = batch.at(-1)!.to;
-    const scheduled = tasks.filter(t => t.status === 'scheduled' && batch.some(w => w.from === taskFocus.get(t.task_id)!.from));
+    const scheduled = tasks.filter(t => t.status === 'scheduled' && batch.some(w => w.from === focuses[t.task_id].from));
     const minutes = scheduled.reduce((sum, t) => sum + t.estimate.minutes, 0);
     const early = scheduled.filter(t => preview.has(t.task_id)).length;
     const issues = tasks.filter(t => t.pending_reason && from <= t.deadline && t.deadline <= to)
@@ -355,7 +352,7 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       schema_version: '1.5', plan_id, user_id, created_at, status: 'active', supersedes: null,
       trigger: 'initial', trigger_ref: null, scope, summary,
       allocation: [...allocationByAssessment.values()].map(entry => ({ ...entry, share: entry.minutes / total })),
-      task_ids: tasks.map(task => task.task_id), model: llm.model,
+      task_ids: tasks.map(task => task.task_id), model: draft.model,
     },
     tasks,
     notes,
@@ -364,3 +361,5 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
     })).sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time)),
   };
 }
+
+export type FinalPlan = ReturnType<typeof finalizePlan>;

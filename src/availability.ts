@@ -30,6 +30,11 @@ export function clock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
+export function availabilityRules(input: PlanningInput) {
+  // An appended exception takes precedence when two rules start on the same date.
+  return input.user.availability.toReversed().sort((a, b) => b.valid_from.localeCompare(a.valid_from));
+}
+
 export function availableDays(input: PlanningInput, scope: Scope): Day[] {
   const { user } = input;
   const active = new Set(input.user_courses.filter(state => state.active).map(state => state.course_key));
@@ -61,7 +66,7 @@ export function availableDays(input: PlanningInput, scope: Scope): Day[] {
     }
   }
 
-  const rules = [...user.availability].sort((a, b) => b.valid_from.localeCompare(a.valid_from));
+  const rules = availabilityRules(input);
   const days: Day[] = [];
   for (let date = scope.from; date <= scope.to; date = shiftDate(date, 1)) {
     if (busyDates.has(date)) continue;

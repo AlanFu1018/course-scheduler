@@ -56,27 +56,28 @@ export function taskWindow(task: DateTask, course: Course, days: Day[], capacity
   return { first, last, minutes, capacity: total };
 }
 
-export function capacityErrors(previous: TaskWindow[], current: (TaskWindow & {title: string})[], days: Day[], capacity: number[]) {
-  const errors: string[] = [];
-  for (const w of current) {
-    if (!w.first) errors.push(`${w.title} 需 ${w.minutes} 分鐘，但沒有任何可排日期`);
-    else if (w.minutes > w.capacity) errors.push(`${w.title} 需 ${w.minutes} 分鐘，但可排日期 ${w.first}～${w.last} 共只有 ${w.capacity} 分鐘`);
-  }
-  const tightest = overloadedIntervals(previous, current, days, capacity);
-  for (const { first, last, required, available } of tightest) {
-    const titles = current.filter(w => w.first >= first && w.last <= last).map(w => w.title);
-    errors.push(`${first}～${last} 共需 ${required} 分鐘，但只有 ${available} 分鐘。本批任務：${titles.join('、')}。請縮短、合併或提前安排，例如將 sprint 改為 practice 以便提早複習。`);
-  }
-  return errors;
-}
-
 export function weekStart(date: string) {
   return shiftDate(date, -((new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7));
 }
 
-function overloadedIntervals(previous: TaskWindow[], current: TaskWindow[], days: Day[], capacity: number[]) {
+type WindowDemand = Pick<TaskWindow, 'first' | 'last' | 'minutes'>;
+type Overload = { first: string; last: string; required: number; available: number };
+const byDeficit = (a: Overload, b: Overload) =>
+  (b.required - b.available) - (a.required - a.available) || a.available - b.available
+    || a.first.localeCompare(b.first) || a.last.localeCompare(b.last);
+
+export function disjointIntervals(intervals: Overload[]) {
+  const selected: Overload[] = [];
+  for (const interval of intervals.toSorted(byDeficit)) {
+    if (selected.every(other => interval.last < other.first || interval.first > other.last)) selected.push(interval);
+  }
+  return selected.sort((a, b) => a.first.localeCompare(b.first));
+}
+
+export function overloadedIntervals(previous: WindowDemand[], current: WindowDemand[], days: Day[], capacity: number[],
+  selection: boolean | 'all' = false) {
   const all = [...previous, ...current].filter(w => w.first);
-  const tightest: { first: string; last: string; required: number; available: number }[] = [];
+  const tightest: Overload[] = [];
   for (const first of new Set(all.map(w => w.first))) {
     // For this start, accumulate demand in deadline order as the interval expands.
     const ending = new Map<string, number>();
@@ -93,12 +94,14 @@ function overloadedIntervals(previous: TaskWindow[], current: TaskWindow[], days
       involvesCurrent ||= currentEnds.has(day.date);
       if (involvesCurrent && required > available) {
         tightest.push({ first, last: day.date, required, available });
-        tightest.sort((a, b) => (b.required - b.available) - (a.required - a.available) || a.available - b.available);
-        if (tightest.length > 3) tightest.pop();
+        if (!selection) {
+          tightest.sort(byDeficit);
+          if (tightest.length > 3) tightest.pop();
+        }
       }
     }
   }
-  return tightest;
+  return selection === true ? disjointIntervals(tightest) : tightest;
 }
 
 export function shortDate(date: string) {

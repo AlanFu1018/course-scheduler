@@ -3,14 +3,16 @@ import { readdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { mock, test } from 'node:test';
 import { availableDays, shiftDate } from '../src/availability.ts';
-import { scheduleTasks } from '../src/scheduler.ts';
+import { overloadedIntervals, scheduleTasks } from '../src/scheduler.ts';
 import { check, filePlanningSource, parsePlanningJson, readPlanningFile, sqlitePlanningSource, timeMinutes } from '../src/data.ts';
 import { errorStatus } from '../src/errors.ts';
 import type { PlanningInput } from '../src/data.ts';
 import { GeminiLlmService } from '../src/llm.ts';
 import { checkpointRun } from '../src/checkpoints.ts';
 import { planHistory } from '../src/plan-history.ts';
-import { generateInitialPlan, validatePlacement } from '../src/planner.ts';
+import { createPlanningServer } from '../src/server.ts';
+import { generateInitialPlan, planFromDraft, validatePlacement } from '../src/planner.ts';
+import type { PlanDraft } from '../src/planner.ts';
 import { planningInputView } from '../src/planning-input-view.ts';
 
 const fixture = (name: string) => new URL(`data/${name}.json`, import.meta.url);
@@ -287,28 +289,90 @@ test('a task that cannot finish across short slots releases all its minutes', as
   assert.deepEqual(result.pending, [{ task_id: 'a', reason: '截止前可用空檔不足（還差 5 分鐘）' }]);
 });
 
-test('capacity-only retry keeps all tasks and reports the lowest priority task as pending', async () => {
+for (const action of ['reschedule', 'accept_pending']) test(`overloaded generation and draft decision: ${action}`, async t => {
   const { input, courses: [course], scope } = await capacityFixture();
-  scope.to = scope.from;
-  const log: string[] = [];
+  scope.to = shiftDate(scope.from, 1);
   let calls = 0;
-  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
-    calls++;
+  t.mock.method(GeminiLlmService.prototype, 'generate', async (prompt: string) => {
+    if (++calls > 2) throw new Error('unexpected Gemini call');
     const data = JSON.parse(prompt.split('\n')[1]);
+    assert.doesNotMatch(prompt, /exam_windows|上次回應不符合規則|"capacity"/);
     if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: '閱讀' }] }] };
     assert.ok(data.batch_focus);
     return { tasks: [0.1, 0.8, 0.9].map(priority => ({
       ...draft, course_key: course.course_key, assessment_id: null, chapters: [], focus_id: data.batch_focus[0].id,
-      deadline: scope.to, title: '閱讀' + priority, priority,
+      deadline: scope.from, title: '閱讀' + priority, priority,
       estimate: { base_minutes: 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 },
     })) };
-  } }, new Date(), { step: (_, fn) => fn(), progress() {}, log: m => log.push(m) });
-  assert.equal(calls, 3);
-  assert.ok(log.some(m => m.includes('保留任務交由排程器處理')));
-  assert.deepEqual(result.tasks.map(t => t.status), ['pending', 'scheduled', 'scheduled']);
-  assert.ok(result.schedule_blocks.every(b => b.task_id !== result.tasks[0].task_id));
-  assert.match(result.notes[0].issues[0], /^閱讀0\.1（30 分鐘，9\/12 截止）：9\/12～9\/12 共需 90 分鐘，只有 60 分鐘/);
-  assert.match(result.schedule.summary, /\n1 項任務未能完整排入，保留為待排。$/);
+  });
+  const originalKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = 'test';
+  const db = new DatabaseSync(':memory:');
+  const server = createPlanningServer({ async load(id) { assert.equal(id, userId); return input; } }, db);
+  t.after(async () => {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    db.close();
+    if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalKey;
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const post = (path: string, body: object) => fetch(url + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const response = await post('/api/plans', { user_id: userId, scope });
+  assert.equal(response.status, 200);
+  const generated = await response.json();
+  assert.equal(calls, 2);
+  assert.equal(generated.status, 'needs_decision');
+  assert.ok(!('schedule_blocks' in generated));
+  assert.deepEqual(generated.tasks.map(t => t.status), ['pending', 'pending', 'pending']);
+  const ids = generated.tasks.map(t => t.task_id);
+  const { course_key } = course;
+  const affected = { course_key, name: course.course.name, target_grade: input.user_courses.find(c => c.course_key === course_key)!.target_grade };
+  assert.equal(generated.overall, null);
+  const [{ suggestions, ...interval }] = generated.short_term;
+  assert.deepEqual(interval, { from: scope.from, to: scope.from, required_minutes: 90, available_minutes: 60,
+    missing_minutes: 30, courses: [{ ...affected, minutes: 90 }], task_ids: ids });
+  assert.deepEqual(suggestions.lower_target, interval.courses);
+  assert.equal(suggestions.extend_exam_buffer, null);
+  const proposal = suggestions.add_time;
+  assert.equal(proposal.raise_daily_max_to, 90);
+  assert.equal(proposal.extra_minutes_per_day, 0);
+  assert.deepEqual(proposal.availability_rule, { ...input.user.availability[0], valid_from: scope.from,
+    valid_to: scope.from, daily_max_minutes: 90 });
+  const history = planHistory(db);
+  assert.equal(history.read(userId), null);
+  const retry = await post('/api/plans', { user_id: userId, scope });
+  assert.equal((await retry.json()).draft_id, generated.draft_id);
+  delete process.env.GEMINI_API_KEY;
+  const path = `/api/plans/drafts/${generated.draft_id}/decision`;
+  assert.equal((await post(path, { user_id: 'other', action })).status, 404);
+  assert.equal((await post(path, { user_id: userId, action: 'lower_target' })).status, 400);
+  if (action === 'reschedule') {
+    input.user.availability.push({ ...proposal.availability_rule, daily_max_minutes: 75 });
+    const stillShort = await (await post(path, { user_id: userId, action })).json();
+    assert.equal(stillShort.draft_id, generated.draft_id);
+    assert.equal(stillShort.short_term[0].missing_minutes, 15);
+    input.user.availability.push(proposal.availability_rule);
+  }
+  const final = await post(path, { user_id: userId, action });
+  assert.equal(final.status, 200);
+  const plan = await final.json();
+  assert.deepEqual(plan.schedule.task_ids, ids);
+  assert.equal(plan.schedule.plan_id, generated.draft_id);
+  assert.equal(plan.schedule.created_at, generated.tasks[0].created_at);
+  assert.deepEqual(plan.tasks.map(t => t.status), [action === 'reschedule' ? 'scheduled' : 'pending', 'scheduled', 'scheduled']);
+  if (action === 'accept_pending') {
+    assert.match(plan.tasks[0].pending_reason, /共需 90 分鐘，只有 60 分鐘/);
+    assert.ok(plan.schedule_blocks.every(b => b.task_id !== ids[0]));
+    assert.match(plan.notes[0].issues[0], /閱讀0\.1/);
+  }
+  assert.deepEqual(history.read(userId), plan);
+  assert.equal(history.stages(userId, generated.draft_id)?.task_batches[0].tasks.length, 3);
+  assert.equal((await post(path, { user_id: userId, action })).status, 404);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM planning_steps').get()!.n, 0);
+  assert.equal(calls, 2);
 });
 
 async function capacityFixture() {
@@ -373,51 +437,214 @@ test('a retry with both a missing focus and excess demand still fails validation
 
 test('single-task capacity reports short slots and empty eligible windows together', async () => {
   const { input, courses: [course], scope } = await capacityFixture();
-  scope.to = scope.from;
+  scope.to = shiftDate(scope.from, 1);
   input.user.date_overrides.push({ date: scope.from, slots: [
     { start_time: '19:00', end_time: '19:30' }, { start_time: '20:00', end_time: '20:15' },
   ] });
   const task = { ...draft, course_key: course.course_key, chapters: [], assessment_id: null,
     deadline: scope.from, title: '閱讀', focus_id: scope.from + '/1' };
-  let corrected = false;
-  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
     const data = JSON.parse(prompt.split('\n')[1]);
     if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: '閱讀' }] }] };
     assert.ok(data.batch_focus);
-    if (!prompt.includes('上次回應不符合規則')) return { tasks: [task,
+    assert.doesNotMatch(prompt, /上次回應不符合規則/);
+    return { tasks: [task,
       { ...task, title: '模考', assessment_id: 'midterm', type: 'mock_exam', phase: 'sprint' }] };
-    assert.match(prompt, /閱讀 需 90 分鐘，但可排日期 2026-09-12～2026-09-12 共只有 30 分鐘/);
-    assert.match(prompt, /模考 需 90 分鐘，但沒有任何可排日期/);
-    corrected = true;
-    return { tasks: [{ ...task, estimate: { ...task.estimate, base_minutes: 20 } }] };
   } });
-  assert.ok(corrected);
+  assert.ok('short_term' in result);
+  assert.deepEqual(result.short_term.map(i => [i.required_minutes, i.available_minutes, i.task_ids]), [
+    [90, 30, [result.tasks[0].task_id]], [90, 0, [result.tasks[1].task_id]],
+  ]);
+  assert.match(result.short_term[1].reason!, /沒有符合課程與考試/);
+  assert.equal(result.short_term[1].suggestions.add_time, null);
+  const proposal = result.short_term[0].suggestions.add_time!;
+  assert.equal(proposal.raise_daily_max_to, null);
+  assert.equal(proposal.extra_minutes_per_day, 60);
+  assert.equal(proposal.availability_rule.daily_max_minutes, 90);
 });
 
-test('overlapping exam buffers share capacity with earlier batches and expose reserved minutes', async () => {
+test('overlapping exam buffers share capacity across generated batches', async () => {
   const { input, courses, scope } = await capacityFixture();
-  let corrected = false;
-  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+  let saved!: PlanDraft;
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
     const data = JSON.parse(prompt.split('\n')[1]);
     if (data.weeks) return { weeks: data.weeks.map((w: { from: string }, i: number) => ({ ...w,
       focus: i === 1 ? [] : [{ course_key: courses[i === 0 ? 0 : 1].course_key, topic: '模考' }] })) };
     assert.ok(data.batch_focus);
     const later = data.previous_tasks.length > 0;
-    assert.match(prompt, /同一段日期由所有課程共用/);
-    assert.deepEqual(data.exam_windows[0], { course_key: courses[0].course_key, assessment_id: 'midterm',
-      exam_date: '2026-09-25', prep_window: [scope.from, '2026-09-24'], buffer_window: ['2026-09-22', '2026-09-24'],
-      prep_capacity_minutes: 13 * 60, buffer_capacity_minutes: 180, already_planned_minutes: later ? 150 : 0 });
-    assert.equal(data.exam_windows[1].already_planned_minutes, 0);
-    if (prompt.includes('上次回應不符合規則')) {
-      assert.match(prompt, /2026-09-22～2026-09-25 共需 300 分鐘，但只有 240 分鐘。本批任務：乙。/);
-      corrected = true;
-    }
+    assert.doesNotMatch(prompt, /exam_windows|上次回應不符合規則/);
     return { tasks: [{ ...draft, course_key: data.batch_focus[0].course_key, chapters: [], assessment_id: 'midterm',
-      type: 'mock_exam', phase: corrected ? 'practice' : 'sprint', deadline: later ? '2026-09-25' : '2026-09-24',
+      type: 'mock_exam', phase: 'sprint', deadline: later ? '2026-09-25' : '2026-09-24',
       title: later ? '乙' : '甲', focus_id: data.batch_focus[0].id,
-      estimate: { base_minutes: 150, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
+      estimate: { base_minutes: later ? 155 : 145, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
+  } }, new Date(), { step: (_, fn) => fn(), progress() {}, saveDraft(d) { saved = d; } });
+  assert.ok('short_term' in result);
+  assert.equal(result.overall, null);
+  assert.equal(result.short_term.length, 1);
+  const [interval] = result.short_term;
+  assert.deepEqual([interval.from, interval.to, interval.required_minutes, interval.available_minutes, interval.missing_minutes],
+    ['2026-09-22', '2026-09-25', 300, 240, 60]);
+  assert.match(result.message, /^平常時間夠用，但 9\/22～9\/25 還差 60 分鐘/);
+  assert.deepEqual(interval.courses.map(c => c.minutes), [155, 145]);
+  assert.deepEqual(interval.suggestions.lower_target, interval.courses);
+  assert.deepEqual(interval.courses.map(c => c.course_key), [courses[1].course_key, courses[0].course_key]);
+  assert.equal(interval.suggestions.add_time!.raise_daily_max_to, 75);
+  assert.deepEqual(interval.suggestions.extend_exam_buffer, { current_days: 3, suggested_days: 4 });
+  input.user.availability[0].exam_buffer_days = interval.suggestions.extend_exam_buffer.suggested_days;
+  const retried = planFromDraft(input, saved, 'reschedule');
+  assert.ok('schedule' in retried);
+});
+
+async function regularAndSprintFixture(regularMinutes: number, sprintMinutes = 0) {
+  const { input, courses: [course], scope } = await capacityFixture();
+  scope.from = '2026-09-07';
+  scope.to = '2026-12-20';
+  const rule = input.user.availability[0];
+  rule.valid_to = '2026-12-31';
+  rule.daily_max_minutes = 30;
+  course.assessments[0].date.value = '2026-10-05';
+  const deadline = shiftDate(course.assessments[0].date.value, -1);
+  if (!sprintMinutes) rule.weekly_slots = [1, 7].map(weekday => ({ weekday, start_time: '19:00', end_time: '19:30' }));
+  let saved!: PlanDraft;
+  const report = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: data.weeks.map((w: { from: string }, i: number) => ({ ...w,
+      focus: i ? [] : [{ course_key: course.course_key, topic: '閱讀與複習' }] })) };
+    const task = (minutes: number) => ({ ...draft, course_key: course.course_key, assessment_id: null,
+      chapters: [], deadline: sprintMinutes ? deadline : scope.to, focus_id: data.batch_focus[0].id,
+      estimate: { base_minutes: minutes, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } });
+    const tasks = [task(regularMinutes)];
+    return { tasks: sprintMinutes ? [...tasks, { ...task(sprintMinutes), type: 'review', phase: 'sprint', assessment_id: 'midterm' }] : tasks };
+  } }, new Date(), { step: (_, fn) => fn(), progress() {}, saveDraft(d) { saved = d; } });
+  assert.ok('overall' in report && report.overall);
+  return { report, input, rule, saved };
+}
+
+test('a semester with too few weekly slots reports only an overall shortage', async () => {
+  const { report, rule } = await regularAndSprintFixture(1000);
+  const overall = report.overall!;
+  assert.deepEqual([overall.required_minutes, overall.available_minutes, overall.missing_minutes], [1000, 900, 100]);
+  assert.equal(overall.intervals.length, 1);
+  assert.deepEqual(overall.suggestions.adjust_regular_time, {
+    weekly_extra_minutes: 7, raise_daily_max_to: null, availability_rule: rule,
+  });
+  assert.equal(overall.suggestions.lower_target[0].minutes, 1000);
+  assert.deepEqual(report.short_term, []);
+  assert.equal(report.message, '你每週提供的時間不夠：整個規劃期間需要 16.7 小時，可用 15 小時。');
+});
+
+test('a recurring weekly deficit is reported once even with weekly deadlines', async () => {
+  const { input, saved } = await regularAndSprintFixture(1000);
+  const task = saved.tasks[0];
+  const tasks = Array.from({ length: 15 }, (_, i) => ({ ...task, task_id: String(i),
+    estimate: { ...task.estimate, minutes: 70 }, deadline: shiftDate(saved.scope.from, 7 * i + 6) }));
+  const result = planFromDraft(input, { ...saved, tasks }, 'reschedule');
+  assert.ok('overall' in result && result.overall);
+  assert.equal(result.overall.suggestions.adjust_regular_time.weekly_extra_minutes, 10);
+  assert.deepEqual(result.short_term, []);
+});
+
+test('a 28-day overload and a nested sprint overload both survive when the semester total fits', async () => {
+  const { report, input, rule, saved } = await regularAndSprintFixture(780, 150);
+  const overall = report.overall!;
+  assert.deepEqual([overall.required_minutes, overall.available_minutes, overall.missing_minutes], [930, 3150, 0]);
+  assert.deepEqual(overall.intervals.map(i => [i.from, i.to, i.missing_minutes]), [['2026-09-07', '2026-10-04', 90]]);
+  assert.deepEqual(overall.suggestions.adjust_regular_time, { weekly_extra_minutes: 23, raise_daily_max_to: 34,
+    availability_rule: { ...rule, daily_max_minutes: 34 } });
+  assert.deepEqual(report.short_term.map(i => [i.from, i.to, i.missing_minutes]), [['2026-10-02', '2026-10-04', 60]]);
+  assert.deepEqual(report.short_term[0].suggestions.extend_exam_buffer, { current_days: 3, suggested_days: 5 });
+  assert.match(report.message, /^你每週提供的時間不夠.*另外 10\/2～10\/4/);
+
+  const shorterScope = { ...saved.scope, to: '2026-10-04' };
+  const both = planFromDraft(input, { ...saved, scope: shorterScope }, 'reschedule');
+  assert.ok('overall' in both && both.overall);
+  assert.equal(both.overall.missing_minutes, 90);
+  assert.deepEqual(both.short_term, report.short_term);
+
+  const exception = { ...rule, valid_from: '2026-09-08', valid_to: '2026-09-14' };
+  input.user.availability.push(exception);
+  const withException = planFromDraft(input, saved, 'reschedule');
+  assert.ok('overall' in withException && withException.overall);
+  assert.deepEqual(withException.overall.suggestions.adjust_regular_time.availability_rule, { ...rule, daily_max_minutes: 35 });
+  input.user.availability.pop();
+
+  input.user.availability[0] = { ...overall.suggestions.adjust_regular_time.availability_rule, daily_max_minutes: 33 };
+  const below = planFromDraft(input, saved, 'reschedule');
+  assert.ok('overall' in below && below.overall);
+  input.user.availability[0] = overall.suggestions.adjust_regular_time.availability_rule;
+  const adjusted = planFromDraft(input, saved, 'reschedule');
+  assert.ok('overall' in adjusted && adjusted.overall === null && adjusted.short_term.length === 1);
+});
+
+test('shortfall reporting includes more than three disjoint overloaded intervals', () => {
+  const days = Array.from({ length: 7 }, (_, i) => evening(shiftDate('2026-09-12', i)));
+  const windows = days.filter((_, i) => i % 2 === 0).map(d => ({ first: d.date, last: d.date, minutes: 70, capacity: 60 }));
+  assert.deepEqual(overloadedIntervals([], windows, days, days.map(() => 60), true),
+    windows.map(w => ({ first: w.first, last: w.last, required: 70, available: 60 })));
+});
+
+test('extra daily minutes are rounded up across uneven free slots and the proposed cap admits the extra time', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  const deadline = shiftDate(scope.from, 1);
+  scope.from = shiftDate(scope.from, -1);
+  scope.to = deadline;
+  const rule = input.user.availability[0];
+  rule.daily_max_minutes = 30;
+  rule.weekly_slots = [6, 7].map((weekday, i) => ({ weekday, start_time: '19:00', end_time: i ? '19:43' : '19:41' }));
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ topic: '閱讀', course_key: course.course_key }] }] };
+    return { tasks: [{ ...draft, course_key: course.course_key, chapters: [], assessment_id: null, deadline: scope.to,
+      focus_id: data.batch_focus[0].id, estimate: { base_minutes: 95, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
   } });
-  assert.ok(corrected);
+  assert.ok('short_term' in result);
+  const proposal = result.short_term[0].suggestions.add_time!;
+  assert.equal(result.short_term[0].missing_minutes, 35);
+  assert.equal(proposal.raise_daily_max_to, null);
+  assert.equal(proposal.extra_minutes_per_day, 6);
+  assert.equal(proposal.availability_rule.daily_max_minutes, 48);
+  assert.deepEqual(proposal.availability_rule.weekly_slots, rule.weekly_slots);
+});
+
+test('a cap-only proposal covers earlier deadlines inside the reported interval', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  const deadline = shiftDate(scope.from, 1);
+  scope.to = shiftDate(deadline, 1);
+  input.user.availability[0].daily_max_minutes = 30;
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: data.weeks.map((w: { from: string }, i: number) => ({ ...w,
+      focus: i ? [] : [{ topic: '閱讀', course_key: course.course_key }] })) };
+    return { tasks: [60, 40].map((minutes, i) => ({ ...draft, course_key: course.course_key, chapters: [],
+      assessment_id: null, deadline: i ? deadline : scope.from, focus_id: data.batch_focus[0].id,
+      estimate: { base_minutes: minutes, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } })) };
+  } });
+  assert.ok('short_term' in result);
+  assert.equal(result.short_term[0].missing_minutes, 40);
+  assert.equal(result.short_term[0].suggestions.add_time!.raise_daily_max_to, 60);
+});
+
+test('an empty timetable still generates tasks and offers slots only on days that can be opened', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  scope.to = shiftDate(scope.from, 1);
+  input.user.availability[0].weekly_slots = [];
+  input.user.calendar_sources.push({ source_id: 'closed', treat_as: 'busy' });
+  input.calendar_events.push({ user_id: userId, source_id: 'closed', all_day: true, start_at: scope.from, end_at: scope.to });
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) {
+      assert.deepEqual(data.weeks, [{ from: scope.from, to: scope.to }]);
+      return { weeks: [{ from: scope.from, focus: [{ topic: '閱讀', course_key: course.course_key }] }] };
+    }
+    return { tasks: [{ ...draft, course_key: course.course_key, chapters: [], assessment_id: null,
+      deadline: scope.to, focus_id: data.batch_focus[0].id }] };
+  } });
+  assert.ok('short_term' in result);
+  const [interval] = result.short_term;
+  assert.deepEqual(interval.task_ids, [result.tasks[0].task_id]);
+  assert.equal(interval.available_minutes, 0);
+  assert.equal(interval.suggestions.add_time!.extra_minutes_per_day, 90);
+  assert.deepEqual(interval.suggestions.add_time!.availability_rule.weekly_slots, []);
 });
 
 test('all-day events block local dates up to the exclusive end', async () => {
@@ -500,6 +727,7 @@ test('checkpoint resume reuses weekly analysis and respects the later focus week
   try {
     await assert.rejects(run, /503/);
     const result = await run();
+    assert.ok('schedule' in result);
     assert.deepEqual(stages,['analysis','tasks','tasks']);
     assert.equal(result.tasks[0].status,'scheduled');
     assert.equal(result.tasks[0].estimate.minutes,90);
@@ -541,6 +769,7 @@ test('16 teaching weeks produce one outline, eight task batches and deterministi
     },
   });
   assert.deepEqual(stages, ['analysis', ...Array(8).fill('tasks')]);
+  assert.ok('schedule' in result);
   assert.equal(result.tasks.length, 64);
   assert.ok(result.tasks.every(t => t.status === 'scheduled'));
   assert.equal(result.notes.length, 8);
@@ -582,6 +811,7 @@ test('two topics in one course-week need separate references and can both finish
     }
   }});
   assert.equal(calls,3);
+  assert.ok('schedule' in result);
   assert.match(result.notes[0].summary, /2 項提前預習/);
   assert.ok(result.schedule_blocks.every(b => b.date === '2026-10-23'));
   assert.equal(result.schedule_blocks.length,2);
