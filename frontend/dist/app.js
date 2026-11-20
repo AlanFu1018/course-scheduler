@@ -358,12 +358,17 @@ function courseSupplementSection(sections) {
   </section>`;
 }
 
-function courseResults(query = "") {
+function coursesAtCell(cell) {
+  if (!cell) return COURSE_CATALOG;
+  return COURSE_CATALOG.filter(course => sectionCells(course).includes(cell));
+}
+
+function courseResults(query = "", cell = state.activeCell) {
   const term = query.trim().toLowerCase();
-  return COURSE_CATALOG.filter(course => [course.code, course.name, course.teacher].some(value => value.toLowerCase().includes(term))).map(course => {
+  return coursesAtCell(cell).filter(course => [course.code, course.name, course.teacher].some(value => value.toLowerCase().includes(term))).map(course => {
     const selected = Object.values(state.timetable).some(item => item?.type === "course" && item.sectionId === course.id);
     return `<button class="course-option ${selected ? "selected" : ""}" data-course-id="${course.id}"><div class="course-option-main"><div class="row course-option-title"><span class="course-category ${course.category}">${course.category === "required" ? "必修" : "通識"}</span><strong>${course.name}</strong>${selected ? `<span class="status confirmed">已加入</span>` : ""}</div><span>${course.code}・${course.teacher}</span><span class="course-times">${formatSectionTimes(course)}</span></div></button>`;
-  }).join("") || `<div class="empty-results">找不到符合的課程</div>`;
+  }).join("") || `<div class="empty-results">${term ? "這個時段找不到符合搜尋條件的課程" : "這個時段目前沒有可選課程"}</div>`;
 }
 
 function coursePicker(cell) {
@@ -373,7 +378,8 @@ function coursePicker(cell) {
   const current = state.timetable[cell];
   const currentSection = current?.type === "course" ? COURSE_CATALOG.find(item => item.id === current.sectionId) : null;
   const removeLabel = currentSection ? `移除整門「${currentSection.name}」` : current?.type === "custom" ? "移除此格行程" : "";
-  return `<div class="modal-backdrop course-picker-backdrop" role="dialog" aria-modal="true"><section class="modal course-picker"><div class="picker-handle"></div><div class="row-between"><div><div class="eyebrow">星期${dayLabel}・第 ${period} 節</div><h2 class="section-title">${time}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="picker-note">點選任一班別後，系統會依該班完整時段一次填入課表。</div><form id="custom-activity-form" class="custom-activity"><div><strong>加入其他行程</strong><span>運動、社團、打工、用餐等都會占用此時段</span></div><div class="custom-input-row"><input id="custom-activity" data-custom-activity-input type="text" inputmode="text" enterkeyhint="done" name="title" required autocomplete="off" autocapitalize="sentences" placeholder="例如：彈鋼琴" aria-label="其他行程名稱" /><button class="btn secondary" type="button" data-action="add-custom-activity">加入</button></div></form><div class="picker-divider"><span>或選擇學校課程</span></div><div class="search-field"><input id="course-search" type="search" autocomplete="off" placeholder="搜尋課號、課名或老師" aria-label="搜尋課程" /></div><div id="course-results" class="course-results">${courseResults()}</div>${removeLabel ? `<button class="btn danger block" data-action="remove-course">${removeLabel}</button>` : ""}</section></div>`;
+  const availableCount = coursesAtCell(cell).length;
+  return `<div class="modal-backdrop course-picker-backdrop" role="dialog" aria-modal="true"><section class="modal course-picker"><div class="picker-handle"></div><div class="row-between"><div><div class="eyebrow">星期${dayLabel}・第 ${period} 節</div><h2 class="section-title">${time}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="picker-note">只顯示這個時段有上課的班別，目前共 ${availableCount} 個選擇。選取後會一次填入該班所有上課時段。</div><form id="custom-activity-form" class="custom-activity"><div><strong>加入其他行程</strong><span>運動、社團、打工、用餐等都會占用此時段</span></div><div class="custom-input-row"><input id="custom-activity" data-custom-activity-input type="text" inputmode="text" enterkeyhint="done" name="title" required autocomplete="off" autocapitalize="sentences" placeholder="例如：彈鋼琴" aria-label="其他行程名稱" /><button class="btn secondary" type="button" data-action="add-custom-activity">加入</button></div></form><div class="picker-divider"><span>或選擇這個時段的學校課程</span></div><div class="search-field"><input id="course-search" type="search" autocomplete="off" placeholder="在此時段搜尋課號、課名或老師" aria-label="搜尋這個時段的課程" /></div><div id="course-results" class="course-results">${courseResults("", cell)}</div>${removeLabel ? `<button class="btn danger block" data-action="remove-course">${removeLabel}</button>` : ""}</section></div>`;
 }
 
 function conflictModal(section, conflictCells) {
@@ -913,7 +919,7 @@ document.addEventListener("input", (event) => {
   if (event.target.id !== "course-search") return;
   const results = document.querySelector("#course-results");
   if (results) {
-    results.innerHTML = courseResults(event.target.value);
+    results.innerHTML = courseResults(event.target.value, state.activeCell);
     bindInteractiveControls(results);
   }
 });
@@ -1054,7 +1060,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=30", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=31", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
