@@ -1,4 +1,4 @@
-const cacheName = 'course-scheduler-shell-v7';
+const cacheName = 'course-scheduler-shell-v8';
 const files = ['/', '/app.css', '/app.js', '/planning-input.js', '/weekly-calendar.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(cacheName).then(cache => cache.addAll(files)));

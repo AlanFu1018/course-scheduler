@@ -43,8 +43,53 @@ function renderList(selector, entries, emptyMessage) {
   }));
 }
 
+const shortDate = date => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+function renderSummary(plan) {
+  const container = document.querySelector('#summary');
+  const notes = plan.notes;
+  if (!Array.isArray(notes)) {
+    // 舊版計畫沒有分段摘要，直接顯示原文。
+    container.replaceChildren(element('p', plan.schedule.summary, 'summary-text'));
+    return;
+  }
+  const items = notes.map(note => {
+    const item = element('li', undefined, 'summary-period');
+    item.append(element('strong', `${shortDate(note.from)}～${shortDate(note.to)}`), element('p', note.summary));
+    if (note.issues.length) {
+      const details = element('details', undefined, 'summary-issues');
+      details.append(element('summary', `有 ${note.issues.length} 個時段未通過檢查，已略過`));
+      const list = element('ul');
+      list.append(...note.issues.map(issue => element('li', issue)));
+      details.append(list);
+      item.append(details);
+    }
+    return item;
+  });
+  const pending = plan.tasks.filter(task => task.status !== 'scheduled');
+  const children = [element('ol', undefined, 'summary-periods')];
+  children[0].append(...items);
+  if (!items.length) children[0].append(element('li', plan.schedule.summary));
+  if (pending.length) {
+    const details = element('details', undefined, 'summary-pending');
+    details.append(element('summary', `${pending.length} 項任務未能完整排入，保留為待排`));
+    const list = element('ul');
+    list.append(...pending.map(task => element('li', `${task.title}（截止 ${shortDate(task.deadline)}，${task.estimate.minutes} 分鐘）`)));
+    details.append(list);
+    children.push(details);
+  }
+  container.replaceChildren(...children);
+}
+
 function showPlan(plan) {
-  document.querySelector('#summary').textContent = plan.schedule.summary;
+  renderSummary(plan);
   renderList('#tasks', plan.tasks.map(task => [
     task.title,
     `${task.status === 'scheduled' ? '已排' : '待排'} · ${task.estimate.minutes} 分鐘 · 截止 ${task.deadline}\n${task.reason}`,

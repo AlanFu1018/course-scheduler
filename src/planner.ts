@@ -16,6 +16,14 @@ const minimumStudyMinutes = 20;
 function minimumBlock(day: Day) {
   return Math.min(minimumStudyMinutes, day.session_minutes, day.daily_max_minutes);
 }
+
+function usableWidths(day: Day) {
+  return day.slots.map(s => timeMinutes(s.end_time) - timeMinutes(s.start_time)).filter(w => w >= minimumBlock(day));
+}
+
+function dayCapacity(day: Day, widths = usableWidths(day)) {
+  return Math.min(day.daily_max_minutes, widths.reduce((sum, width) => sum + width, 0));
+}
 type Estimate = { base_minutes: number; difficulty_mult: number; familiarity_mult: number; speed_factor: number };
 type TaskDraft = {
   course_key: string; assessment_id: string | null; type: typeof taskTypes[number];
@@ -32,8 +40,8 @@ function splitOptions(total: number, days: Day[]): SplitOption[] {
   let capacity = 0;
   for (const day of days) {
     const min = Math.ceil(minimumBlock(day));
-    const widths = day.slots.map(s => timeMinutes(s.end_time) - timeMinutes(s.start_time)).filter(w => w >= min);
-    capacity += Math.min(day.daily_max_minutes, widths.reduce((a, b) => a + b, 0));
+    const widths = usableWidths(day);
+    capacity += dayCapacity(day, widths);
     for (const width of widths) {
       const max = Math.floor(Math.min(width, day.daily_max_minutes, day.session_minutes));
       if (min > 0 && max >= min) limits.set(min + '/' + max, [min, max]);
@@ -119,6 +127,8 @@ function validateTask(task: TaskDraft, courses: Course[], scope: Scope): TaskDra
     check(course && taskTypes.includes(task.type) && phases.includes(task.phase), '任務課程、類型或階段無效');
     const assessment = course.assessments.find(item => item.id === task.assessment_id);
     check(task.assessment_id === null || assessment, '任務引用了未知評量');
+    check(task.phase !== 'sprint' || (assessment?.type === 'exam' && reviewTypes.has(task.type)),
+      'sprint 只用於關聯考試的複習或考題練習；作業或一般學習請用 learn 或 practice');
     check(Array.isArray(task.chapters) && task.chapters.every(id => course.course.textbook.chapters.some(chapter => chapter.id === id)),
       '任務引用了未知章節');
     const earliest = course.start_date > scope.from ? course.start_date : scope.from;
@@ -140,8 +150,9 @@ function validateTask(task: TaskDraft, courses: Course[], scope: Scope): TaskDra
     };
 }
 
-function dateRestriction(task: Task, course: Course, day: Day): string | null {
-  if (day.date < course.start_date || day.date > task.deadline) return '時段超出課程期間或任務期限';
+function dateRestriction(task: TaskDraft, course: Course, day: Day): string | null {
+  if (day.date < course.start_date) return `課程 ${course.start_date} 才開始`;
+  if (day.date > task.deadline) return `超過任務期限 ${task.deadline}`;
   const exam = course.assessments.find(item => item.id === task.assessment_id && item.type === 'exam');
   if (exam && isExamPreparation(task) && day.date < shiftDate(exam.date.value, -examPrepDays)) {
     return `專門備考只能安排在考前 ${examPrepDays} 天內`;
@@ -152,13 +163,64 @@ function dateRestriction(task: Task, course: Course, day: Day): string | null {
   return null;
 }
 
+type TaskWindow = { first: string; last: string; title: string; minutes: number; capacity: number };
+
+function taskWindow(task: TaskDraft, course: Course, days: Day[], capacity: number[]): TaskWindow {
+  let first = '', last = '', total = 0;
+  for (const [i, day] of days.entries()) {
+    if (dateRestriction(task, course, day)) continue;
+    first ||= day.date;
+    last = day.date;
+    total += capacity[i];
+  }
+  return { first, last, title: task.title, minutes: estimateMinutes(task.estimate), capacity: total };
+}
+
+function capacityErrors(previous: TaskWindow[], current: TaskWindow[], days: Day[], capacity: number[]) {
+  const errors: string[] = [];
+  for (const w of current) {
+    if (!w.first) errors.push(`${w.title} 需 ${w.minutes} 分鐘，但沒有任何可排日期`);
+    else if (w.minutes > w.capacity) errors.push(`${w.title} 需 ${w.minutes} 分鐘，但可排日期 ${w.first}～${w.last} 共只有 ${w.capacity} 分鐘`);
+  }
+  const all = [...previous, ...current].filter(w => w.first);
+  const tightest: { first: string; last: string; required: number; available: number }[] = [];
+  for (const first of new Set(all.map(w => w.first))) {
+    // For this start, accumulate demand in deadline order as the interval expands.
+    const ending = new Map<string, number>();
+    for (const w of all) {
+      if (w.first >= first) ending.set(w.last, (ending.get(w.last) ?? 0) + w.minutes);
+    }
+    const currentEnds = new Set(current.filter(w => w.first >= first).map(w => w.last));
+    let available = 0, required = 0, involvesCurrent = false;
+    for (const [i, day] of days.entries()) {
+      if (day.date < first) continue;
+      available += capacity[i];
+      if (!ending.has(day.date)) continue;
+      required += ending.get(day.date)!;
+      involvesCurrent ||= currentEnds.has(day.date);
+      if (involvesCurrent && required > available) {
+        tightest.push({ first, last: day.date, required, available });
+        tightest.sort((a, b) => (b.required - b.available) - (a.required - a.available) || a.available - b.available);
+        if (tightest.length > 3) tightest.pop();
+      }
+    }
+  }
+  for (const { first, last, required, available } of tightest) {
+    const titles = current.filter(w => w.first >= first && w.last <= last).map(w => w.title);
+    errors.push(`${first}～${last} 共需 ${required} 分鐘，但只有 ${available} 分鐘。本批任務：${titles.join('、')}。請縮短、合併或提前安排，例如將 sprint 改為 practice 以便提早複習。`);
+  }
+  return errors;
+}
+
 function validatePlacement(response: unknown, tasks: Task[], days: Day[], courses: Course[], remaining: Map<string, number>) {
   const placement = response as Placement | null;
   check(text(placement?.summary) && Array.isArray(placement.blocks), '模型回應缺少排程理由或時段');
   const taskById = new Map(tasks.map(task => [task.task_id, task]));
   const dayByDate = new Map(days.map(day => [day.date, day]));
   const totals = new Map<string, number>();
-  const blocksByDate = new Map<string, { start: number; end: number }[]>();
+  const blocksByDate = new Map<string, { start: number; end: number; label: string }[]>();
+  // 收集所有違規再一次回報，讓模型的單次修正能一併處理，而不是修一個又冒出下一個。
+  const errors: string[] = [];
   const blocks = placement.blocks.map(block => {
     const task = taskById.get(block.task_id);
     const day = dayByDate.get(block.date);
@@ -166,15 +228,18 @@ function validatePlacement(response: unknown, tasks: Task[], days: Day[], course
     const start = timeMinutes(block.start_time);
     const end = timeMinutes(block.end_time);
     const duration = end - start;
-    check(duration >= minimumBlock(day) && duration <= day.session_minutes,
-      `${task.title}（${block.date} ${block.start_time}–${block.end_time}）：長度 ${duration} 分鐘，每段須為 ${minimumBlock(day)} 至 ${day.session_minutes} 分鐘。請重新分配各段分鐘數。`);
-    check(day.slots.some(slot => timeMinutes(slot.start_time) <= start && end <= timeMinutes(slot.end_time)),
-      '時段超出可用時間或與課程／行事曆衝突');
+    const label = `${task.title}（${block.date} ${block.start_time}–${block.end_time}）`;
+    if (duration < minimumBlock(day) || duration > day.session_minutes) {
+      errors.push(`${label}：長度 ${duration} 分鐘，每段須為 ${minimumBlock(day)} 至 ${day.session_minutes} 分鐘`);
+    }
+    if (!day.slots.some(slot => timeMinutes(slot.start_time) <= start && end <= timeMinutes(slot.end_time))) {
+      errors.push(`${label}：超出可用時間或與上課、行事曆衝突`);
+    }
     const course = courses.find(course => course.course_key === task.course_key)!;
     const restriction = dateRestriction(task, course, day);
-    if (restriction) throw new Error(`${task.title}（${block.date}）：${restriction}`);
+    if (restriction) errors.push(`${label}：${restriction}`);
     const intervals = blocksByDate.get(block.date) ?? [];
-    intervals.push({ start, end });
+    intervals.push({ start, end, label });
     blocksByDate.set(block.date, intervals);
     totals.set(task.task_id, (totals.get(task.task_id) ?? 0) + duration);
     return { task_id: task.task_id, date: block.date, start_time: block.start_time, end_time: block.end_time };
@@ -182,16 +247,22 @@ function validatePlacement(response: unknown, tasks: Task[], days: Day[], course
   for (const [date, intervals] of blocksByDate) {
     const day = dayByDate.get(date)!;
     intervals.sort((a, b) => a.start - b.start);
-    check(intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0) <= day.daily_max_minutes,
-      `${date} 超過單日上限`);
-    check(intervals.every((interval, index) => index === 0 || interval.start - intervals[index - 1].end >= day.break_minutes),
-      `${date} 的讀書時段重疊或休息間隔不足`);
+    const used = intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0);
+    if (used > day.daily_max_minutes) errors.push(`${date}：共 ${used} 分鐘，超過單日上限 ${day.daily_max_minutes} 分鐘`);
+    for (let index = 1; index < intervals.length; index++) {
+      const gap = intervals[index].start - intervals[index - 1].end;
+      if (gap < day.break_minutes) {
+        errors.push(`${intervals[index - 1].label} 與 ${intervals[index].label}：${gap < 0 ? '重疊' : `只間隔 ${gap} 分鐘`}，須間隔至少 ${day.break_minutes} 分鐘`);
+      }
+    }
   }
   for (const task of tasks) {
     const total = totals.get(task.task_id);
-    check(total === undefined || total <= (remaining.get(task.task_id) ?? 0), '時段總分鐘超過任務剩餘分鐘');
-
+    if (total !== undefined && total > (remaining.get(task.task_id) ?? 0)) {
+      errors.push(`${task.title}：共 ${total} 分鐘，超過剩餘 ${remaining.get(task.task_id) ?? 0} 分鐘`);
+    }
   }
+  check(!errors.length, errors.join('\n'));
   return { summary: placement.summary, blocks };
 }
 
@@ -254,6 +325,9 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
     assessments: course.assessments.filter(assessment => assessmentDeadline(assessment) >= scope.from),
   }));
   const days = availableDays(input, scope);
+  const capacity = days.map(day => dayCapacity(day));
+  const capacityBetween = (from: string, to: string) => days.reduce((sum, day, i) =>
+    sum + (from <= day.date && day.date <= to ? capacity[i] : 0), 0);
   const { plan_id, created_at } = await run.step('identity', async () => ({
     plan_id: `p_${randomUUID()}`, created_at: now.toISOString(),
   }));
@@ -269,9 +343,7 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
     .map(course => ({ ...course, weekly_schedule: course.weekly_schedule.filter(week =>
       week.date_range[0] <= to && week.date_range[1] >= from) }));
   const capacities = weeks.map(week => ({
-    ...week, minutes: days.filter(day => day.date >= week.from && day.date <= week.to)
-      .reduce((sum, day) => sum + Math.min(day.daily_max_minutes, day.slots.reduce((n, slot) =>
-        n + timeMinutes(slot.end_time) - timeMinutes(slot.start_time), 0)), 0),
+    ...week, minutes: capacityBetween(week.from, week.to),
   }));
   type Focus = { course_key: string; topic: string };
   type WeekFocus = { from: string; focus: Focus[] };
@@ -294,6 +366,10 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   const batches = [];
   for (let i = 0; i < weeks.length; i += 2) batches.push(weeks.slice(i, i + 2));
   const tasks: Task[] = [];
+  const previousWindows: TaskWindow[] = [];
+  const courseByKey = new Map(courses.map(c => [c.course_key, c]));
+  const windowFor = (task: TaskDraft) => taskWindow(task, courseByKey.get(task.course_key)!, days, capacity);
+  const rules = [...input.user.availability].sort((a, b) => b.valid_from.localeCompare(a.valid_from));
   const taskFocus = new Map<string, { id: string; from: string; topic: string }>();
   for (const [i, batch] of batches.entries()) {
     run.progress(`產生任務，第 ${i + 1}/${batches.length} 批`);
@@ -305,8 +381,28 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       ...course, assessments: course.assessments.filter(item => assessmentDeadline(item) >= scope.from)
         .map(item => ({ ...item, latest_task_deadline: assessmentDeadline(item) })),
     }));
+    const exam_windows = batchCourses.flatMap(({ course_key }) => courseByKey.get(course_key)!.assessments
+      .filter(a => a.type === 'exam' && scope.from <= a.date.value && a.date.value <= scope.to)
+      .map(a => {
+        const exam_date = a.date.value, last = shiftDate(exam_date, -1);
+        const prepStart = shiftDate(exam_date, -examPrepDays);
+        const first = prepStart < scope.from ? scope.from : prepStart;
+        const rule = rules.find(r => r.valid_from <= last && last <= r.valid_to);
+        let bufferStart = shiftDate(exam_date, -(rule?.exam_buffer_days ?? 0));
+        let bufferCapacity = 0;
+        for (const [i, day] of days.entries()) {
+          if (day.date > last || day.date < shiftDate(exam_date, -day.exam_buffer_days)) continue;
+          if (day.date < bufferStart) bufferStart = day.date;
+          bufferCapacity += capacity[i];
+        }
+        return { course_key, assessment_id: a.id, exam_date, prep_window: first <= last ? [first, last] : [],
+          buffer_window: [bufferStart, last], prep_capacity_minutes: capacityBetween(first, last),
+          buffer_capacity_minutes: bufferCapacity, already_planned_minutes: previousWindows.reduce((sum, w) =>
+            sum + (w.first && w.first >= bufferStart && w.last <= last ? w.minutes : 0), 0) };
+      }));
     const rows = await run.step(`tasks-${i}`, () => generateValidated(llm, run.log, prompt(
-      '依整體分析產生本批各週的具體任務，每項任務引用 batch_focus 的 focus_id（id），並根據該重點的 topic 設計具體內容；每個 id 至少有一項任務，可以拆成多項。依掌握度、難度與速度填估時四參數，基準可參考閱讀60分鐘、複習45分鐘。允許預習及補讀。優先度0到1。日常任務 assessment_id 為 null。考試期限最晚前一天。專門備考限考前14天，sprint 限考前保留期。避免重複先前任務。', {
+      '依整體分析產生本批各週的具體任務，每項任務引用 batch_focus 的 focus_id（id），並根據該重點的 topic 設計具體內容；每個 id 至少有一項任務，可以拆成多項。依掌握度、難度與速度填估時四參數，基準可參考閱讀60分鐘、複習45分鐘。允許預習及補讀。優先度0到1。日常任務 assessment_id 為 null。考試期限最晚前一天。專門備考限考前14天，sprint 限考前保留期。各考試的保留期容量見 exam_windows，同一段日期由所有課程共用；sprint 任務總分鐘不得超過保留期剩餘容量。避免重複先前任務。', {
+        exam_windows,
         deadline_rule: 'deadline 可早於重點所屬週，必須落在規劃起日之後（含當日）及課程期限內。評量任務最晚是 latest_task_deadline。一般任務期限最晚是課程結束日。',
         study_unit_guidance: `將同一重點的短活動組成可連續學習的任務，例如閱讀加例題。一般每段至少 ${minimumStudyMinutes} 分鐘，依實際內容估時。`,
         scope, batch, batch_focus: focuses, outline, capacity: capacities.filter(w => w.from >= from && w.from <= to),
@@ -327,12 +423,14 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
             errors.push(`${task?.title ?? '未命名任務'}：${(error as Error).message}`);
           }
         }
-        check(!errors.length, errors.join('\n'));
+        if (!errors.length) errors.push(...capacityErrors(previousWindows, rows.map(r => windowFor(r.draft)), days, capacity));
         const missing = focuses.filter(f => !rows.some(r => r.focus.id === f.id));
-        check(!missing.length, `缺少對應任務：${missing.map(f => `${f.id} ${f.course_key}「${f.topic}」`).join('、')}`);
+        if (missing.length) errors.push(`缺少對應任務：${missing.map(f => `${f.id} ${f.course_key}「${f.topic}」`).join('、')}`);
+        check(!errors.length, errors.join('\n'));
         return rows;
       }));
     for (const { draft, focus, id } of rows) {
+      previousWindows.push(windowFor(draft));
       taskFocus.set(id, focus);
       tasks.push({ ...draft, estimate: { ...draft.estimate, minutes: estimateMinutes(draft.estimate) },
         task_id: id, schema_version: '1.5', user_id, plan_id, created_at, updated_at: created_at,
@@ -341,7 +439,12 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   }
   const remaining = new Map(tasks.map(t => [t.task_id, t.estimate.minutes]));
   const accepted: BlockDraft[] = [];
-  const summaries: string[] = [];
+  // 模型有時會在摘要引用（甚至截斷的）task_id，換成任務名稱再給學生看。
+  const readable = (summary: string) => summary.replace(/\bt_[0-9a-f-]{4,}/gi, id => {
+    const task = tasks.find(t => t.task_id.startsWith(id.toLowerCase()));
+    return task ? `「${task.title}」` : '某項任務';
+  });
+  const notes: { from: string; to: string; summary: string; issues: string[] }[] = [];
   for (const [i, batch] of batches.entries()) {
     run.progress(`安排時段，第 ${i + 1}/${batches.length} 批`);
     const batchDays = days.filter(d => batch.some(w => w.from <= d.date && d.date <= w.to))
@@ -415,7 +518,7 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       return part;
     };
     const part = await run.step(`blocks-${i}`, () => generateValidated(llm, run.log, prompt(
-      '決定本批的實際時段與摘要。依 target_week 安排每週學習重點；target_week 是內容所屬週；為預習或提前完成作業可將整項任務排在更早的合法日期。每段限制 session_minutes，段間休息 break_minutes，每日不超過 daily_max_minutes。只選 eligible_dates。跨批可部分完成，累計不得超過 remaining_minutes。最後能完成的任務請排足剩餘分鐘；無法安排請說明原因。', {
+      '決定本批的實際時段與摘要。依 target_week 安排每週學習重點；target_week 是內容所屬週；為預習或提前完成作業可將整項任務排在更早的合法日期。每段限制 session_minutes，段間休息 break_minutes，每日不超過 daily_max_minutes。只選 eligible_dates。跨批可部分完成，累計不得超過 remaining_minutes。最後能完成的任務請排足剩餘分鐘。summary 是給學生看的說明：繁體中文一到兩句，說明這段期間的安排重點與無法排入的原因；不要提 task_id、批次、欄位名稱或限制規則。', {
         split_rule: '每個任務在本批只選一個 split_options 方案。每段回傳 option 與 segment（minutes 陣列的序號，從 1 開始，不可重複），再選日期及開始時間。後端依該段分鐘數計算結束時間。完整排入須使用該方案所有段；跨批可只用部分段，下批會依剩餘分鐘重新提供方案。',
         batch, outline, days: batchDays, tasks: candidates, prior_blocks: accepted,
       }), placementSchema, validateBatch,
@@ -430,11 +533,14 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
             } catch { /* Keep only model-proposed blocks that pass every constraint. */ }
           }
         }
-        const summary = `${batch[0].from} 起的部分時段未通過驗證：${reason}。`;
+        const proposed = (value as { summary?: unknown } | null)?.summary;
+        const summary = text(proposed) ? proposed : '部分時段未通過檢查。';
         const errors = completionErrors(validateBlocks({ summary, blocks: choices }).blocks);
-        return validateBlocks({ summary, blocks: choices.filter(block => !errors.has(block.task_id)) });
+        const issues = reason.split('\n').filter(text);
+        return { ...validateBlocks({ summary, blocks: choices.filter(block => !errors.has(block.task_id)) }), issues };
       }));
-    summaries.push(part.summary);
+    notes.push({ from: batch[0].from, to: batch.at(-1)!.to, summary: readable(part.summary),
+      issues: (part as { issues?: string[] }).issues ?? [] });
     for (const block of part.blocks) {
       remaining.set(block.task_id, remaining.get(block.task_id)! - (timeMinutes(block.end_time) - timeMinutes(block.start_time)));
       accepted.push(block);
@@ -443,8 +549,11 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
   const complete = new Set(tasks.filter(t => remaining.get(t.task_id) === 0).map(t => t.task_id));
   for (const task of tasks) if (complete.has(task.task_id)) task.status = 'scheduled';
   const placement = { blocks: accepted.filter(block => complete.has(block.task_id)) };
-  if (complete.size < tasks.length) summaries.push(`${tasks.length - complete.size} 項任務未能完整排入，保留為待排。`);
-  const summary = summaries.join('\n') || (courses.length ? '指定範圍沒有待安排的學習任務。' : '這段期間沒有可規劃的課程。');
+  const pending = tasks.length - complete.size;
+  const summary = [
+    ...notes.map(note => `${note.from}～${note.to}：${note.summary}`),
+    ...(pending ? [`${pending} 項任務未能完整排入，保留為待排。`] : []),
+  ].join('\n') || (courses.length ? '指定範圍沒有待安排的學習任務。' : '這段期間沒有可規劃的課程。');
   const allocationByAssessment = new Map<string, {
     course_key: string; assessment_id: string; minutes: number; reason: string;
   }>();
@@ -465,6 +574,7 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       task_ids: tasks.map(task => task.task_id), model: llm.model,
     },
     tasks,
+    notes,
     schedule_blocks: placement.blocks.map(block => ({
       ...block, block_id: `b_${randomUUID()}`, user_id, locked: false, status: 'planned',
     })).sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time)),

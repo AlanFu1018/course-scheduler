@@ -155,6 +155,93 @@ const draft = {
   deadline: '2026-12-20', estimate: { base_minutes: 60, difficulty_mult: 1.2, familiarity_mult: 1.2, speed_factor: 1.05 },
 };
 
+async function capacityFixture() {
+  const input = await source.load(userId);
+  const courses = input.courses.filter(c => ['self_networks', 'self_fitness'].includes(c.course_key));
+  input.courses = courses;
+  input.user.date_overrides = [];
+  input.calendar_events = [];
+  input.user.availability = [{
+    valid_from: '2026-09-01', valid_to: '2026-09-30', daily_max_minutes: 60,
+    session_minutes: 30, break_minutes: 0, exam_buffer_days: 3,
+    weekly_slots: Array.from({ length: 7 }, (_, i) => ({ weekday: i + 1, start_time: '19:00', end_time: '21:00' })),
+  }];
+  for (const [i, c] of courses.entries()) {
+    c.course.sessions = [];
+    c.assessments = [{ id: 'midterm', type: 'exam', date: { value: '2026-09-' + (25 + i), week: 3 }, scope: { value: [] } }];
+  }
+  return { input, courses, scope: { from: '2026-09-12', to: '2026-09-26', course_keys: courses.map(c => c.course_key) } };
+}
+
+test('sprint rejects both an unlinked review and exam-linked homework in the same correction', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  const make = (title: string, type: string, assessment_id: string | null) => ({
+    ...draft, course_key: course.course_key, chapters: [], title, type, assessment_id, phase: 'sprint',
+    deadline: '2026-09-24', focus_id: scope.from + '/1',
+  });
+  let corrected = false;
+  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: data.weeks.map((w: { from: string }) => ({ ...w,
+      focus: w.from === scope.from ? [{ course_key: course.course_key, topic: '考前複習' }] : [] })) };
+    if (!data.batch_focus) return { summary: '完成', blocks: [] };
+    if (!prompt.includes('上次回應不符合規則')) return { tasks: [make('甲', 'review', null), make('乙', 'homework', 'midterm')] };
+    for (const title of ['甲', '乙']) assert.match(prompt, new RegExp(title + '：sprint .*learn 或 practice'));
+    corrected = true;
+    return { tasks: [make('甲', 'review', 'midterm')] };
+  } });
+  assert.ok(corrected);
+});
+
+test('single-task capacity reports short slots and empty eligible windows together', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  scope.to = scope.from;
+  input.user.date_overrides.push({ date: scope.from, slots: [
+    { start_time: '19:00', end_time: '19:30' }, { start_time: '20:00', end_time: '20:15' },
+  ] });
+  const task = { ...draft, course_key: course.course_key, chapters: [], assessment_id: null,
+    deadline: scope.from, title: '閱讀', focus_id: scope.from + '/1' };
+  let corrected = false;
+  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: '閱讀' }] }] };
+    if (!data.batch_focus) return { summary: '完成', blocks: [] };
+    if (!prompt.includes('上次回應不符合規則')) return { tasks: [task,
+      { ...task, title: '模考', assessment_id: 'midterm', type: 'mock_exam', phase: 'sprint' }] };
+    assert.match(prompt, /閱讀 需 90 分鐘，但可排日期 2026-09-12～2026-09-12 共只有 30 分鐘/);
+    assert.match(prompt, /模考 需 90 分鐘，但沒有任何可排日期/);
+    corrected = true;
+    return { tasks: [{ ...task, estimate: { ...task.estimate, base_minutes: 20 } }] };
+  } });
+  assert.ok(corrected);
+});
+
+test('overlapping exam buffers share capacity with earlier batches and expose reserved minutes', async () => {
+  const { input, courses, scope } = await capacityFixture();
+  let corrected = false;
+  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: data.weeks.map((w: { from: string }, i: number) => ({ ...w,
+      focus: i === 1 ? [] : [{ course_key: courses[i === 0 ? 0 : 1].course_key, topic: '模考' }] })) };
+    if (!data.batch_focus) return { summary: '完成', blocks: [] };
+    const later = data.previous_tasks.length > 0;
+    assert.match(prompt, /同一段日期由所有課程共用/);
+    assert.deepEqual(data.exam_windows[0], { course_key: courses[0].course_key, assessment_id: 'midterm',
+      exam_date: '2026-09-25', prep_window: [scope.from, '2026-09-24'], buffer_window: ['2026-09-22', '2026-09-24'],
+      prep_capacity_minutes: 13 * 60, buffer_capacity_minutes: 180, already_planned_minutes: later ? 150 : 0 });
+    assert.equal(data.exam_windows[1].already_planned_minutes, 0);
+    if (prompt.includes('上次回應不符合規則')) {
+      assert.match(prompt, /2026-09-22～2026-09-25 共需 300 分鐘，但只有 240 分鐘。本批任務：乙。/);
+      corrected = true;
+    }
+    return { tasks: [{ ...draft, course_key: data.batch_focus[0].course_key, chapters: [], assessment_id: 'midterm',
+      type: 'mock_exam', phase: corrected ? 'practice' : 'sprint', deadline: later ? '2026-09-25' : '2026-09-24',
+      title: later ? '乙' : '甲', focus_id: data.batch_focus[0].id,
+      estimate: { base_minutes: 150, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
+  } });
+  assert.ok(corrected);
+});
+
 test('all-day events block local dates up to the exclusive end', async () => {
   const input = await source.load(userId);
   const dates = ['2026-09-10', '2026-09-11', '2026-09-12'];
@@ -458,4 +545,33 @@ test('Gemini adapter sends a structured prompt and reads the returned JSON', asy
   } finally {
     mocked.mock.restore();
   }
+});
+
+test('placement reports every violation at once and notes stay readable', async () => {
+  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: ['self_networks'] };
+  const input = await source.load(userId);
+  const make = (title: string) => ({ ...draft, title, assessment_id: null, deadline: '2026-09-13', focus_id: scope.from + '/1',
+    estimate: { base_minutes: 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } });
+  let calls = 0;
+  let correction = '';
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    switch (++calls) {
+      case 1: return { weeks: [{ from: scope.from, focus: [{ course_key: 'self_networks', topic: '閱讀' }] }] };
+      case 2: return { tasks: [make('甲'), make('乙'), make('丙')] };
+      default: {
+        if (calls === 4) correction = prompt;
+        const { tasks } = JSON.parse(prompt.split('\n').find(line => line.startsWith('{"split_rule"'))!);
+        return { summary: `已安排 ${tasks[0].task_id.slice(0, 10)}`, blocks: tasks.map((t: { task_id: string }) => ({
+          task_id: t.task_id, date: scope.from, start_time: '19:00', option: 1, segment: 1,
+        })) };
+      }
+    }
+  } });
+  assert.equal(calls, 4);
+  assert.equal(correction.match(/重疊/g)?.length, 2);
+  assert.equal(result.schedule_blocks.length, 1);
+  assert.equal(result.notes.length, 1);
+  assert.match(result.notes[0].summary, /^已安排 「甲」$/);
+  assert.equal(result.notes[0].issues.length, 2);
+  assert.match(result.schedule.summary, /^2026-09-07～2026-09-13：已安排 「甲」\n2 項任務未能完整排入/);
 });
