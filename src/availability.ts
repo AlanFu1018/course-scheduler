@@ -26,7 +26,7 @@ function localParts(timezone: string) {
   };
 }
 
-function clock(minutes: number): string {
+export function clock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 

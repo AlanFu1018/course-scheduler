@@ -40,7 +40,7 @@ export function planHistory(db: DatabaseSync) {
       const steps = db.prepare('SELECT step,data FROM saved_plan_steps WHERE plan_id=? ORDER BY rowid').all(planId);
       const tasks = new Map(result.tasks.map(task => [task.task_id, task]));
       const task_batches = [];
-      const placement_batches = [];
+      const placement_batches = (result.notes ?? []).map((note, i) => ({ batch: i + 1, ...note }));
       let weekly_analysis = null;
       for (const row of steps) {
         const step = String(row.step);
@@ -52,7 +52,6 @@ export function planHistory(db: DatabaseSync) {
             task_id: record.id, focus: record.focus, task: tasks.get(record.id),
           })),
         });
-        if (step.startsWith('blocks-')) placement_batches.push({ batch: Number(step.slice(7)) + 1, ...value });
       }
       return { plan_id: planId, weekly_analysis, task_batches, placement_batches };
     },

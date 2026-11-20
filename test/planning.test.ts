@@ -2,14 +2,15 @@ import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { mock, test } from 'node:test';
-import { availableDays } from '../src/availability.ts';
-import { check, filePlanningSource, parsePlanningJson, readPlanningFile, sqlitePlanningSource } from '../src/data.ts';
+import { availableDays, shiftDate } from '../src/availability.ts';
+import { scheduleTasks } from '../src/scheduler.ts';
+import { check, filePlanningSource, parsePlanningJson, readPlanningFile, sqlitePlanningSource, timeMinutes } from '../src/data.ts';
 import { errorStatus } from '../src/errors.ts';
 import type { PlanningInput } from '../src/data.ts';
 import { GeminiLlmService } from '../src/llm.ts';
-import type { LlmService } from '../src/llm.ts';
 import { checkpointRun } from '../src/checkpoints.ts';
-import { generateInitialPlan } from '../src/planner.ts';
+import { planHistory } from '../src/plan-history.ts';
+import { generateInitialPlan, validatePlacement } from '../src/planner.ts';
 import { planningInputView } from '../src/planning-input-view.ts';
 
 const fixture = (name: string) => new URL(`data/${name}.json`, import.meta.url);
@@ -155,6 +156,161 @@ const draft = {
   deadline: '2026-12-20', estimate: { base_minutes: 60, difficulty_mult: 1.2, familiarity_mult: 1.2, speed_factor: 1.05 },
 };
 
+function evening(date: string) {
+  return { date, slots: [{ start_time: '19:00', end_time: '22:00' }],
+    daily_max_minutes: 150, session_minutes: 50, break_minutes: 10, exam_buffer_days: 7 };
+}
+
+function homework(task_id: string, minutes: number, deadline: string, target_week: string) {
+  return { ...draft, type: 'homework', task_id, assessment_id: null, deadline, target_week, estimate: { minutes } };
+}
+
+test('130-minute homework fills late evening slots before October 1', async () => {
+  const input = await source.load(userId);
+  const course = input.courses.find(c => c.course_key === draft.course_key)!;
+  const days = Array.from({ length: 5 }, (_, i) => evening(shiftDate('2026-09-26', i)));
+  const courses = days.map(d => ({ ...course, course_key: d.date, start_date: d.date }));
+  const nightly = days.map(d => ({ ...homework(d.date, 100, d.date, '2026-09-21'), course_key: d.date }));
+  const assignment = homework('assignment', 130, '2026-10-01', '2026-09-28');
+  const result = scheduleTasks([...nightly, assignment], [course, ...courses], days);
+  assert.deepEqual(result.pending, []);
+  const blocks = result.blocks.filter(b => b.task_id === assignment.task_id);
+  assert.ok(blocks.every(b => '21:00' <= b.start_time && b.end_time <= '22:00' && b.date < assignment.deadline));
+  assert.equal(blocks.reduce((sum, b) => sum + timeMinutes(b.end_time) - timeMinutes(b.start_time), 0), 130);
+});
+
+test('light demand uses the weekly daily target before using hard capacity', async () => {
+  const { courses } = await source.load(userId);
+  const days = Array.from({ length: 5 }, (_, i) => evening(shiftDate('2026-09-07', i)));
+  const result = scheduleTasks([homework('a', 100, days[4].date, days[0].date)], courses, days);
+  assert.deepEqual(result.pending, []);
+  assert.deepEqual(result.blocks.map(b => [b.date, b.start_time, b.end_time]), days.map(d => [d.date, '19:00', '19:20']));
+});
+
+test('55 minutes fit in two legal sessions with a break on a single day', async () => {
+  const { courses } = await source.load(userId);
+  const day = evening('2026-09-07');
+  const result = scheduleTasks([homework('a', 55, day.date, day.date)], courses, [day]);
+  assert.deepEqual(result.pending, []);
+  const durations = result.blocks.map(b => timeMinutes(b.end_time) - timeMinutes(b.start_time));
+  assert.equal(durations.length, 2);
+  assert.ok(durations.every(m => m >= 20 && m <= 50));
+  assert.equal(durations[0] + durations[1], 55);
+  assert.equal(timeMinutes(result.blocks[1].start_time) - timeMinutes(result.blocks[0].end_time), 10);
+});
+
+test('fragmented slots can require rearranging earlier EDF placements', async () => {
+  const { courses } = await source.load(userId);
+  const days = [39, 34, 29].map((minutes, i) => ({
+    ...evening(shiftDate('2026-09-07', i)), slots: [{ start_time: '19:00', end_time: '19:' + minutes }],
+  }));
+  const tasks = [29, 34, 39].map(n => homework(String(n), n, days[2].date, days[0].date));
+  const result = scheduleTasks(tasks, courses, days);
+  assert.deepEqual(result.pending, []);
+  assert.deepEqual(result.blocks.map(b => [b.task_id, b.date]), days.map((d, i) => [String([39, 34, 29][i]), d.date]));
+});
+
+test('repair respects fixed blocks and their daily minutes outside the failed task window', async () => {
+  const { courses: [course] } = await source.load(userId);
+  const monday = '2026-09-07', tuesday = '2026-09-08', wednesday = '2026-09-09';
+  const courses = [course, { ...course, course_key: 'movable', start_date: tuesday },
+    { ...course, course_key: 'later', start_date: wednesday }];
+  const tasks = [
+    { ...homework('fixed', 30, tuesday, tuesday), course_key: course.course_key },
+    { ...homework('movable', 20, wednesday, wednesday), course_key: 'movable', priority: 1 },
+    { ...homework('failed', 40, wednesday, wednesday), course_key: 'later' },
+  ];
+  // Only the movable task can shift from Wednesday to Tuesday. Moving the fixed
+  // task back to Monday would require following the overlap transitively.
+  for (const tuesdayCap of [50, 49]) {
+    const days = [
+      evening(monday), { ...evening(tuesday), daily_max_minutes: tuesdayCap },
+      { ...evening(wednesday), slots: [{ start_time: '19:00', end_time: '20:00' }] },
+    ];
+    const result = scheduleTasks(tasks, courses, days);
+    assert.deepEqual(result.blocks[0], { task_id: 'fixed', date: tuesday, start_time: '19:00', end_time: '19:30' });
+    if (tuesdayCap === 50) {
+      assert.deepEqual(result.pending, []);
+      assert.deepEqual(result.blocks.slice(1), [
+        { task_id: 'movable', date: tuesday, start_time: '19:40', end_time: '20:00' },
+        { task_id: 'failed', date: wednesday, start_time: '19:00', end_time: '19:40' },
+      ]);
+    } else {
+      assert.deepEqual(result.pending.map(p => p.task_id), ['failed']);
+      assert.deepEqual(result.blocks.slice(1), [
+        { task_id: 'movable', date: wednesday, start_time: '19:00', end_time: '19:20' },
+      ]);
+    }
+  }
+});
+
+for (const k of [6, 10, 11, 12]) {
+  test(`schedules a seeded semester with ${k} tasks per week within 3 seconds`, async t => {
+    const input = await source.load(userId);
+    const days = availableDays(input, { from: '2026-09-07', to: '2026-12-25', course_keys: [] });
+    let seed = 1;
+    function rnd() {
+      seed = seed * 16807 % 2147483647;
+      return seed / 2147483647;
+    }
+    const tasks = [];
+    for (let w = '2026-09-07'; w <= '2026-12-14'; w = shiftDate(w, 7)) {
+      for (let i = 0; i < k; i++) {
+        const id = String(tasks.length);
+        tasks.push({
+          task_id: id, title: id, course_key: input.courses[tasks.length % input.courses.length].course_key,
+          assessment_id: null, type: 'reading' as const, phase: 'learn' as const, priority: rnd(),
+          target_week: w, deadline: shiftDate(w, 2 + Math.floor(rnd() * 9)),
+          estimate: { minutes: 5 * Math.round((30 + rnd() * 150) / 5) },
+        });
+      }
+    }
+    const start = performance.now();
+    const { blocks, pending } = scheduleTasks(tasks, input.courses, days);
+    const elapsed = performance.now() - start;
+    t.diagnostic(`scheduleTasks K=${k} took ${elapsed.toFixed(1)} ms`);
+    assert.ok(elapsed < 3000, `scheduleTasks took ${elapsed} ms`);
+    const pendingIds = new Set(pending.map(p => p.task_id));
+    validatePlacement(blocks, tasks.map(task => ({
+      ...task, status: pendingIds.has(task.task_id) ? 'pending' : 'scheduled',
+    })), days, input.courses);
+  });
+}
+
+test('a task that cannot finish across short slots releases all its minutes', async () => {
+  const { courses } = await source.load(userId);
+  const day = { ...evening('2026-09-07'), slots: [
+    { start_time: '19:00', end_time: '19:30' }, { start_time: '19:35', end_time: '20:00' },
+  ] };
+  const result = scheduleTasks([homework('a', 55, day.date, day.date)], courses, [day]);
+  assert.deepEqual(result.blocks, []);
+  assert.deepEqual(result.pending, [{ task_id: 'a', reason: '截止前可用空檔不足（還差 5 分鐘）' }]);
+});
+
+test('capacity-only retry keeps all tasks and reports the lowest priority task as pending', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  scope.to = scope.from;
+  const log: string[] = [];
+  let calls = 0;
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    calls++;
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: '閱讀' }] }] };
+    assert.ok(data.batch_focus);
+    return { tasks: [0.1, 0.8, 0.9].map(priority => ({
+      ...draft, course_key: course.course_key, assessment_id: null, chapters: [], focus_id: data.batch_focus[0].id,
+      deadline: scope.to, title: '閱讀' + priority, priority,
+      estimate: { base_minutes: 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 },
+    })) };
+  } }, new Date(), { step: (_, fn) => fn(), progress() {}, log: m => log.push(m) });
+  assert.equal(calls, 3);
+  assert.ok(log.some(m => m.includes('保留任務交由排程器處理')));
+  assert.deepEqual(result.tasks.map(t => t.status), ['pending', 'scheduled', 'scheduled']);
+  assert.ok(result.schedule_blocks.every(b => b.task_id !== result.tasks[0].task_id));
+  assert.match(result.notes[0].issues[0], /^閱讀0\.1（30 分鐘，9\/12 截止）：9\/12～9\/12 共需 90 分鐘，只有 60 分鐘/);
+  assert.match(result.schedule.summary, /\n1 項任務未能完整排入，保留為待排。$/);
+});
+
 async function capacityFixture() {
   const input = await source.load(userId);
   const courses = input.courses.filter(c => ['self_networks', 'self_fitness'].includes(c.course_key));
@@ -173,24 +329,46 @@ async function capacityFixture() {
   return { input, courses, scope: { from: '2026-09-12', to: '2026-09-26', course_keys: courses.map(c => c.course_key) } };
 }
 
-test('sprint rejects both an unlinked review and exam-linked homework in the same correction', async () => {
+test('the first batch normalizes invalid sprint phases and preserves exam-linked review sprints', async () => {
   const { input, courses: [course], scope } = await capacityFixture();
   const make = (title: string, type: string, assessment_id: string | null) => ({
     ...draft, course_key: course.course_key, chapters: [], title, type, assessment_id, phase: 'sprint',
     deadline: '2026-09-24', focus_id: scope.from + '/1',
   });
-  let corrected = false;
-  await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+  const log: string[] = [];
+  let batchCalls = 0;
+  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
     const data = JSON.parse(prompt.split('\n')[1]);
     if (data.weeks) return { weeks: data.weeks.map((w: { from: string }) => ({ ...w,
       focus: w.from === scope.from ? [{ course_key: course.course_key, topic: '考前複習' }] : [] })) };
-    if (!data.batch_focus) return { summary: '完成', blocks: [] };
-    if (!prompt.includes('上次回應不符合規則')) return { tasks: [make('甲', 'review', null), make('乙', 'homework', 'midterm')] };
-    for (const title of ['甲', '乙']) assert.match(prompt, new RegExp(title + '：sprint .*learn 或 practice'));
-    corrected = true;
-    return { tasks: [make('甲', 'review', 'midterm')] };
-  } });
-  assert.ok(corrected);
+    assert.ok(data.batch_focus);
+    batchCalls++;
+    assert.doesNotMatch(prompt, /上次回應不符合規則/);
+    return { tasks: [make('甲', 'review', null), make('乙', 'homework', 'midterm'),
+      make('丙', 'reading', null), make('丁', 'final_review', 'midterm')] };
+  } }, new Date(), { step: (_, fn) => fn(), progress() {}, log: message => log.push(message) });
+  assert.equal(batchCalls, 1);
+  assert.deepEqual(result.tasks.map(task => [task.title, task.phase]), [
+    ['甲', 'practice'], ['乙', 'practice'], ['丙', 'learn'], ['丁', 'sprint'],
+  ]);
+  assert.deepEqual(log.filter(message => message.includes('sprint 不適用')), [
+    '甲：sprint 不適用，改為 practice', '乙：sprint 不適用，改為 practice', '丙：sprint 不適用，改為 learn',
+  ]);
+});
+
+test('a retry with both a missing focus and excess demand still fails validation', async () => {
+  const { input, courses: [course], scope } = await capacityFixture();
+  scope.to = scope.from;
+  let calls = 0;
+  await assert.rejects(generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
+    calls++;
+    const data = JSON.parse(prompt.split('\n')[1]);
+    if (data.weeks) return { weeks: [{ from: scope.from,
+      focus: ['甲', '乙'].map(topic => ({ course_key: course.course_key, topic })) }] };
+    return { tasks: [{ ...draft, chapters: [], assessment_id: null, course_key: course.course_key,
+      focus_id: data.batch_focus[0].id, deadline: scope.to }] };
+  } }), error => errorStatus(error) === 502 && /缺少對應任務/.test(String(error)));
+  assert.equal(calls, 3);
 });
 
 test('single-task capacity reports short slots and empty eligible windows together', async () => {
@@ -205,7 +383,7 @@ test('single-task capacity reports short slots and empty eligible windows togeth
   await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
     const data = JSON.parse(prompt.split('\n')[1]);
     if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: '閱讀' }] }] };
-    if (!data.batch_focus) return { summary: '完成', blocks: [] };
+    assert.ok(data.batch_focus);
     if (!prompt.includes('上次回應不符合規則')) return { tasks: [task,
       { ...task, title: '模考', assessment_id: 'midterm', type: 'mock_exam', phase: 'sprint' }] };
     assert.match(prompt, /閱讀 需 90 分鐘，但可排日期 2026-09-12～2026-09-12 共只有 30 分鐘/);
@@ -223,7 +401,7 @@ test('overlapping exam buffers share capacity with earlier batches and expose re
     const data = JSON.parse(prompt.split('\n')[1]);
     if (data.weeks) return { weeks: data.weeks.map((w: { from: string }, i: number) => ({ ...w,
       focus: i === 1 ? [] : [{ course_key: courses[i === 0 ? 0 : 1].course_key, topic: '模考' }] })) };
-    if (!data.batch_focus) return { summary: '完成', blocks: [] };
+    assert.ok(data.batch_focus);
     const later = data.previous_tasks.length > 0;
     assert.match(prompt, /同一段日期由所有課程共用/);
     assert.deepEqual(data.exam_windows[0], { course_key: courses[0].course_key, assessment_id: 'midterm',
@@ -269,37 +447,9 @@ test('a project preparation title is valid for a homework task', async () => {
     if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: course.course_key, topic: title }] }] };
     if (data.previous_tasks) return { tasks: [{ ...draft, course_key: course.course_key, title, type: 'homework',
       chapters: [], assessment_id: project.id, deadline: scope.to, focus_id: data.batch_focus[0].id }] };
-    return { summary: title, blocks: [] };
+    assert.fail('unexpected model call');
   } });
   assert.equal(result.tasks[0].assessment_id, project.id);
-});
-
-test('fallback saves complete placements and drops a partially placed task at its deadline', async () => {
-  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: [draft.course_key] };
-  const input = await source.load(userId);
-  let blocks: unknown;
-  let proposal: object;
-  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
-    if (proposal) return proposal;
-    const data = JSON.parse(prompt.split('\n').at(-1)!);
-    if (data.weeks) return { weeks: [{ from: scope.from, focus: ['partial', 'complete'].map(topic => ({
-      course_key: draft.course_key, topic,
-    })) }] };
-    if (data.previous_tasks) return { tasks: data.batch_focus.map((f: {id: string; topic: string}) => ({
-      ...draft, title: f.topic, focus_id: f.id, assessment_id: null, deadline: scope.to,
-      estimate: { base_minutes: f.topic === 'partial' ? 90 : 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 },
-    })) };
-    proposal = { summary: 'placement', blocks: data.tasks.map((t: {task_id: string; title: string}) => ({
-      task_id: t.task_id, date: scope.from, start_time: t.title === 'partial' ? '19:00' : '20:00', option: 1, segment: 1,
-    })) };
-    return proposal;
-  } }, new Date(), { progress() {}, async step(name, compute) {
-    const value = await compute();
-    if (name === 'blocks-0') blocks = (value as { blocks: unknown }).blocks;
-    return value;
-  } });
-  const complete = result.tasks.find(t => t.title === 'complete')!;
-  assert.deepEqual(blocks, [{ task_id: complete.task_id, date: scope.from, start_time: '20:00', end_time: '20:30' }]);
 });
 
 test('request, internal and Gemini errors get distinct statuses and transient failures retry three times', async t => {
@@ -326,7 +476,7 @@ test('request, internal and Gemini errors get distinct statuses and transient fa
   }
 });
 
-test('weekly analysis then all task batches, cross-batch placement and checkpoint resume', async () => {
+test('checkpoint resume reuses weekly analysis and respects the later focus week', async () => {
   const input = await source.load(userId);
   const scope = { from: '2026-09-07', to: '2026-09-27', course_keys: ['self_networks'] };
   const db = new DatabaseSync(':memory:');
@@ -340,55 +490,32 @@ test('weekly analysis then all task batches, cross-batch placement and checkpoin
     }
     if (data.previous_tasks) {
       stages.push('tasks');
+      if (!interrupted) { interrupted = true; throw new Error('503'); }
       return {tasks: data.batch[0].from === '2026-09-21' ? [{...draft, focus_id:data.batch_focus[0].id, assessment_id:null}] : []};
     }
-    const task = data.tasks[0];
-    if (data.batch[0].from === '2026-09-07') {
-      stages.push('early placement');
-      assert.equal(task.remaining_minutes,90);
-      return {summary:'提前安排', blocks:[{ task_id:task.task_id,date:'2026-09-18',start_time:'15:00',option:1,segment:1}]};
-    }
-    stages.push('late placement');
-    assert.equal(data.prior_blocks.length,1);
-    assert.equal(task.remaining_minutes,40);
-    if (!interrupted) { interrupted = true; throw new Error('503'); }
-    assert.deepEqual(task.split_options[0].minutes, [40]);
-    return {summary:'完成', blocks:[{ task_id:task.task_id,date:'2026-09-21',start_time:'19:00',option:1,segment:1}]};
+    assert.fail('unexpected model call');
   }};
-  const run = () => generateInitialPlan(input, scope, llm, new Date(), checkpointRun(db, [scope,input], () => {}));
+  const checkpoint = checkpointRun(db, [scope,input], () => {});
+  const run = () => generateInitialPlan(input, scope, llm, new Date(), checkpoint);
   try {
     await assert.rejects(run, /503/);
     const result = await run();
-    assert.deepEqual(stages,['analysis','tasks','early placement','late placement','late placement']);
+    assert.deepEqual(stages,['analysis','tasks','tasks']);
     assert.equal(result.tasks[0].status,'scheduled');
     assert.equal(result.tasks[0].estimate.minutes,90);
-    assert.equal(result.schedule_blocks.length,2);
+    assert.ok(result.schedule_blocks.length >= 2);
     assert.equal(result.schedule_blocks[0].task_id,result.schedule_blocks[1].task_id);
     assert.ok(!('target_week' in result.tasks[0]));
+    assert.ok(result.schedule_blocks.every(b => b.date >= '2026-09-21'));
+    assert.equal(result.notes.length, 2);
+    const history = planHistory(db);
+    history.save(result, checkpoint.completedSteps());
+    assert.deepEqual(history.stages(userId, result.schedule.plan_id)?.placement_batches,
+      result.notes.map((note, i) => ({ batch: i + 1, ...note })));
   } finally { db.close(); }
 });
 
-test('invalid and incomplete model placements stay pending without backend rescheduling', async () => {
-  const input = await source.load(userId);
-  const scope = { from:'2026-09-07',to:'2026-09-13',course_keys:['self_networks'] };
-  let calls=0;
-  const result=await generateInitialPlan(input,scope,{model:'mock',async generate(prompt) {
-    calls++;
-    if(calls===1) return {weeks:[{from:scope.from,focus:[{course_key:'self_networks',topic:'閱讀'}]}]};
-    if(calls===2) return {tasks:[{...draft,assessment_id:null,focus_id:scope.from+'/1'}]};
-    if(calls===3) {
-      const {tasks}=JSON.parse(prompt.split('\n').at(-1)!);
-      return {summary:'超長',blocks:[{task_id:tasks[0].task_id,date:scope.from,start_time:'19:00',end_time:'20:30'}]};
-    }
-    assert.match(prompt,/分段方案編號/);
-    return {summary:'無法排入',blocks:[]};
-  }});
-  assert.equal(calls,4);
-  assert.equal(result.tasks[0].status,'pending');
-  assert.deepEqual(result.schedule_blocks,[]);
-});
-
-test('16 teaching weeks produce one outline, eight task batches then eight placement batches', async () => {
+test('16 teaching weeks produce one outline, eight task batches and deterministic placement', async () => {
   const scope = { from: '2026-09-07', to: '2026-12-25', course_keys: ['self_networks'] };
   const input = await source.load(userId);
   const stages: string[] = [];
@@ -405,21 +532,34 @@ test('16 teaching weeks produce one outline, eight task batches then eight place
       if (data.previous_tasks) {
         stages.push('tasks');
         assert.equal(data.courses[0].weekly_schedule.length, 2);
-        return { tasks: data.batch.map((w: {from: string; to: string}) => ({
+        return { tasks: data.batch.flatMap((w: {from: string; to: string}) => [40, 55, 85, 130].map(minutes => ({
           ...draft, assessment_id: null, title: w.from + ' 閱讀', focus_id: w.from + '/1', deadline: w.to,
-          estimate: {base_minutes: 40, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1},
-        })) };
+          estimate: {base_minutes: minutes, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1},
+        }))) };
       }
-      stages.push('placement');
-      return { summary: '本週預習', blocks: data.tasks.filter((t: {target_week: string}) =>
-        data.batch.some((w: {from: string}) => w.from === t.target_week)).map((t: {task_id: string; target_week: string}) => ({
-          task_id: t.task_id, date: t.target_week, start_time: '19:00', option:1, segment:1,
-        })) };
+      assert.fail('unexpected model call');
     },
   });
-  assert.deepEqual(stages, ['analysis', ...Array(8).fill('tasks'), ...Array(8).fill('placement')]);
-  assert.equal(result.schedule_blocks.length, 16);
-  assert.equal(new Set(result.schedule_blocks.map(b => b.date)).size, 16);
+  assert.deepEqual(stages, ['analysis', ...Array(8).fill('tasks')]);
+  assert.equal(result.tasks.length, 64);
+  assert.ok(result.tasks.every(t => t.status === 'scheduled'));
+  assert.equal(result.notes.length, 8);
+  const available = availableDays(input, scope);
+  for (const day of available) {
+    const blocks = result.schedule_blocks.filter(b => b.date === day.date);
+    let end = -Infinity, total = 0;
+    for (const b of blocks) {
+      const start = timeMinutes(b.start_time), length = timeMinutes(b.end_time) - start;
+      assert.ok(start - end >= day.break_minutes);
+      assert.ok(length >= 20 && length <= day.session_minutes);
+      assert.ok(day.slots.some(s => s.start_time <= b.start_time && b.end_time <= s.end_time));
+      assert.ok(b.date <= result.tasks.find(t => t.task_id === b.task_id)!.deadline);
+      end = start + length;
+      total += length;
+    }
+    assert.ok(total <= day.daily_max_minutes);
+  }
+  assert.ok(new Set(result.schedule_blocks.map(b => b.date)).size >= 16);
   assert.equal(result.schedule_blocks[0].date, scope.from);
 });
 
@@ -438,63 +578,14 @@ test('two topics in one course-week need separate references and can both finish
       case 3:
         assert.match(prompt,/缺少對應任務：2026-10-26\/2 self_networks「壅塞控制」/);
         return {tasks:[make(0),make(1)]};
-      default: {
-        const {tasks}=JSON.parse(prompt.split('\n').at(-1)!);
-        return {summary:'提前完成', blocks:tasks.map((t: {task_id:string}, i:number) => ({
-          task_id:t.task_id, date:scope.from, start_time:i?'20:00':'19:00',option:1,segment:1,
-        }))};
-      }
+      default: assert.fail('unexpected model call');
     }
   }});
-  assert.equal(calls,4);
+  assert.equal(calls,3);
+  assert.match(result.notes[0].summary, /2 項提前預習/);
+  assert.ok(result.schedule_blocks.every(b => b.date === '2026-10-23'));
   assert.equal(result.schedule_blocks.length,2);
   assert.ok(result.tasks.every(t => t.status === 'scheduled' && !('focus_id' in t)));
-});
-
-test('rebalances a 55-minute task instead of keeping a five-minute fragment', async () => {
-  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: ['self_networks'] };
-  const input = await source.load(userId);
-  let calls = 0;
-  let id = '';
-  const block = (start_time: string, segment: number) => ({ task_id: id, date: scope.from, start_time, option: 2, segment });
-  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
-    switch (++calls) {
-      case 1: return { weeks: [{ from: scope.from, focus: [{ course_key: 'self_networks', topic: '閱讀' }] }] };
-      case 2: return { tasks: [{ ...draft, assessment_id: null, focus_id: scope.from + '/1',
-        estimate: { base_minutes: 55, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
-      case 3: {
-        const task = JSON.parse(prompt.split('\n').at(-1)!).tasks[0];
-        id = task.task_id;
-        assert.deepEqual(task.split_options[1].minutes, [30, 25]);
-        return { summary: '初排', blocks: [block('19:00',1), block('20:00',1)] };
-      }
-      default:
-        assert.match(prompt, /分段序號無效或重複/);
-        return { summary: '重新分段', blocks: [block('19:00',1), block('19:40',2)] };
-    }
-  } });
-  assert.equal(calls, 4);
-  assert.equal(result.tasks[0].status, 'scheduled');
-  assert.deepEqual(result.schedule_blocks.map(b => b.end_time), ['19:30', '20:05']);
-});
-
-test('110-minute task can use three legal segments with model-selected starts', async () => {
-  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: ['self_networks'] };
-  const input = await source.load(userId);
-  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
-    const data = JSON.parse(prompt.split('\n').at(-1)!);
-    if (data.weeks) return { weeks: [{ from: scope.from, focus: [{ course_key: 'self_networks', topic: '閱讀' }] }] };
-    if (data.previous_tasks) return { tasks: [{ ...draft, assessment_id: null, focus_id: data.batch_focus[0].id,
-      estimate: { base_minutes: 110, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } }] };
-    const task = data.tasks[0];
-    assert.deepEqual(task.split_options.slice(0, 2).map((o: { minutes: number[] }) => o.minutes),
-      [[50, 40, 20], [40, 35, 35]]);
-    return { summary: '週一閱讀', blocks: ['19:00', '20:00', '21:00'].map((start_time, i) => ({
-      task_id: task.task_id, option: 2, segment: i + 1, date: scope.from, start_time,
-    })) };
-  } });
-  assert.equal(result.tasks[0].status, 'scheduled');
-  assert.deepEqual(result.schedule_blocks.map(b => b.end_time), ['19:40', '20:35', '21:35']);
 });
 
 test('daily quota pauses immediately and 503 retries the same request', async () => {
@@ -545,33 +636,4 @@ test('Gemini adapter sends a structured prompt and reads the returned JSON', asy
   } finally {
     mocked.mock.restore();
   }
-});
-
-test('placement reports every violation at once and notes stay readable', async () => {
-  const scope = { from: '2026-09-07', to: '2026-09-13', course_keys: ['self_networks'] };
-  const input = await source.load(userId);
-  const make = (title: string) => ({ ...draft, title, assessment_id: null, deadline: '2026-09-13', focus_id: scope.from + '/1',
-    estimate: { base_minutes: 30, difficulty_mult: 1, familiarity_mult: 1, speed_factor: 1 } });
-  let calls = 0;
-  let correction = '';
-  const result = await generateInitialPlan(input, scope, { model: 'mock', async generate(prompt) {
-    switch (++calls) {
-      case 1: return { weeks: [{ from: scope.from, focus: [{ course_key: 'self_networks', topic: '閱讀' }] }] };
-      case 2: return { tasks: [make('甲'), make('乙'), make('丙')] };
-      default: {
-        if (calls === 4) correction = prompt;
-        const { tasks } = JSON.parse(prompt.split('\n').find(line => line.startsWith('{"split_rule"'))!);
-        return { summary: `已安排 ${tasks[0].task_id.slice(0, 10)}`, blocks: tasks.map((t: { task_id: string }) => ({
-          task_id: t.task_id, date: scope.from, start_time: '19:00', option: 1, segment: 1,
-        })) };
-      }
-    }
-  } });
-  assert.equal(calls, 4);
-  assert.equal(correction.match(/重疊/g)?.length, 2);
-  assert.equal(result.schedule_blocks.length, 1);
-  assert.equal(result.notes.length, 1);
-  assert.match(result.notes[0].summary, /^已安排 「甲」$/);
-  assert.equal(result.notes[0].issues.length, 2);
-  assert.match(result.schedule.summary, /^2026-09-07～2026-09-13：已安排 「甲」\n2 項任務未能完整排入/);
 });

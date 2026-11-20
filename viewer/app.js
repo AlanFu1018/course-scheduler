@@ -65,7 +65,7 @@ function renderSummary(plan) {
     item.append(element('strong', `${shortDate(note.from)}～${shortDate(note.to)}`), element('p', note.summary));
     if (note.issues.length) {
       const details = element('details', undefined, 'summary-issues');
-      details.append(element('summary', `有 ${note.issues.length} 個時段未通過檢查，已略過`));
+      details.append(element('summary', `有 ${note.issues.length} 項任務未排入`));
       const list = element('ul');
       list.append(...note.issues.map(issue => element('li', issue)));
       details.append(list);

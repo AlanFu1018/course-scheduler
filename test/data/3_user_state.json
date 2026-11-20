@@ -47,7 +47,7 @@
         "daily_max_minutes": 180,
         "session_minutes": 50,
         "break_minutes": 10,
-        "exam_buffer_days": 3
+        "exam_buffer_days": 7
       }
     ],
     "calendar_sources": [],

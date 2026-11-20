@@ -91,7 +91,7 @@ const server = createServer(async (request, response) => {
             log(message);
           });
         const input = await source.load(id);
-        const run = checkpointRun(checkpoints, [4, llm.model, body.scope, input], message => {
+        const run = checkpointRun(checkpoints, [5, llm.model, body.scope, input], message => {
           stage = message;
           progress.set(id, stage);
           log('開始');
