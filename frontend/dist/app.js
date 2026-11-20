@@ -373,7 +373,7 @@ function coursePicker(cell) {
   const current = state.timetable[cell];
   const currentSection = current?.type === "course" ? COURSE_CATALOG.find(item => item.id === current.sectionId) : null;
   const removeLabel = currentSection ? `移除整門「${currentSection.name}」` : current?.type === "custom" ? "移除此格行程" : "";
-  return `<div class="modal-backdrop course-picker-backdrop" role="dialog" aria-modal="true"><section class="modal course-picker"><div class="picker-handle"></div><div class="row-between"><div><div class="eyebrow">星期${dayLabel}・第 ${period} 節</div><h2 class="section-title">${time}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="picker-note">點選任一班別後，系統會依該班完整時段一次填入課表。</div><form id="custom-activity-form" class="custom-activity"><div><strong>加入其他行程</strong><span>運動、社團、打工、用餐等都會占用此時段</span></div><div class="custom-input-row"><input id="custom-activity" name="title" required autocomplete="off" placeholder="例如：彈鋼琴" /><button class="btn secondary" type="submit" data-action="add-custom-activity">加入</button></div></form><div class="picker-divider"><span>或選擇學校課程</span></div><div class="search-field"><input id="course-search" type="search" autocomplete="off" placeholder="搜尋課號、課名或老師" aria-label="搜尋課程" /></div><div id="course-results" class="course-results">${courseResults()}</div>${removeLabel ? `<button class="btn danger block" data-action="remove-course">${removeLabel}</button>` : ""}</section></div>`;
+  return `<div class="modal-backdrop course-picker-backdrop" role="dialog" aria-modal="true"><section class="modal course-picker"><div class="picker-handle"></div><div class="row-between"><div><div class="eyebrow">星期${dayLabel}・第 ${period} 節</div><h2 class="section-title">${time}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="picker-note">點選任一班別後，系統會依該班完整時段一次填入課表。</div><form id="custom-activity-form" class="custom-activity"><div><strong>加入其他行程</strong><span>運動、社團、打工、用餐等都會占用此時段</span></div><div class="custom-input-row"><input id="custom-activity" data-custom-activity-input type="text" inputmode="text" enterkeyhint="done" name="title" required autocomplete="off" autocapitalize="sentences" placeholder="例如：彈鋼琴" aria-label="其他行程名稱" /><button class="btn secondary" type="button" data-action="add-custom-activity">加入</button></div></form><div class="picker-divider"><span>或選擇學校課程</span></div><div class="search-field"><input id="course-search" type="search" autocomplete="off" placeholder="搜尋課號、課名或老師" aria-label="搜尋課程" /></div><div id="course-results" class="course-results">${courseResults()}</div>${removeLabel ? `<button class="btn danger block" data-action="remove-course">${removeLabel}</button>` : ""}</section></div>`;
 }
 
 function conflictModal(section, conflictCells) {
@@ -586,6 +586,18 @@ function handleCourseOption(courseOption) {
 }
 
 function bindInteractiveControls(root = document) {
+  root.querySelectorAll("[data-custom-activity-input]:not([data-activity-bound])").forEach(input => {
+    input.dataset.activityBound = "true";
+    ["pointerdown", "click", "input", "compositionstart", "compositionend"].forEach(type => {
+      input.addEventListener(type, event => event.stopPropagation());
+    });
+    input.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      handleFormSubmit(input.closest("form"));
+    });
+  });
   root.querySelectorAll("[data-action]:not([data-action-bound])").forEach(button => {
     button.dataset.actionBound = "true";
     button.addEventListener("click", event => {
@@ -1035,7 +1047,17 @@ document.addEventListener("keydown", (event) => {
 });
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+  let refreshingForUpdate = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshingForUpdate) return;
+    refreshingForUpdate = true;
+    window.location.reload();
+  });
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js?v=30", { updateViaCache: "none" })
+      .then(registration => registration.update())
+      .catch(() => {});
+  });
 }
 
 render();

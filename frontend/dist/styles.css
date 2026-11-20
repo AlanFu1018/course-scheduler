@@ -618,7 +618,14 @@ textarea { min-height: 118px; resize: vertical; }
 }
 
 .course-picker-backdrop { align-items: end; }
-.course-picker { max-height: min(86dvh, 760px); padding-top: 10px; gap: 16px; overflow-y: auto; }
+.course-picker {
+  max-height: calc(100vh - 16px);
+  max-height: min(86svh, 760px);
+  padding-top: 10px;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .picker-handle { width: 42px; height: 5px; border-radius: 999px; background: #d6dbe3; margin: 0 auto 2px; }
 .picker-note {
   padding: 10px 12px;
@@ -640,6 +647,16 @@ textarea { min-height: 118px; resize: vertical; }
 .custom-activity strong { color: var(--success); font-size: 15px; }
 .custom-activity span { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .custom-input-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.custom-input-row input {
+  min-width: 0;
+  min-height: 48px;
+  position: relative;
+  z-index: 2;
+  font-size: 16px;
+  touch-action: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
 .custom-input-row .btn { min-width: 66px; }
 .picker-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .picker-divider::before, .picker-divider::after { content: ""; height: 1px; background: var(--border); flex: 1; }
