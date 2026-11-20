@@ -1,0 +1,3 @@
+.env
+.planning-checkpoints.sqlite*
+node_modules/

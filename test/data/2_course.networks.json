@@ -1,0 +1,460 @@
+{
+  "schema_version": "1.5",
+  "user_id": "u_0001",
+  "course_key": "self_networks",
+  "source": {
+    "type": "user_created",
+    "analysis_id": null,
+    "syllabus_url": null,
+    "raw_text_hash": null
+  },
+  "start_date": "2026-09-07",
+  "end_date": "2026-12-25",
+  "course": {
+    "code": "TEST001",
+    "name": "計算機網路",
+    "name_en": "Computer Networks",
+    "instructor": "王財任",
+    "credits": 3,
+    "sessions": [
+      {
+        "weekday": 1,
+        "start_time": "09:00",
+        "end_time": "09:50",
+        "room": "E6-A204"
+      },
+      {
+        "weekday": 1,
+        "start_time": "10:00",
+        "end_time": "10:50",
+        "room": "E6-A204"
+      },
+      {
+        "weekday": 1,
+        "start_time": "11:00",
+        "end_time": "11:50",
+        "room": "E6-A204"
+      }
+    ],
+    "textbook": {
+      "title": "電腦網路講義",
+      "authors": [
+        "模擬教學團隊"
+      ],
+      "edition": 1,
+      "chapters": [
+        {
+          "id": "Ch1",
+          "title": "網路分層、封包與延遲"
+        },
+        {
+          "id": "Ch2",
+          "title": "HTTP 與快取"
+        },
+        {
+          "id": "Ch3",
+          "title": "DNS 與電子郵件"
+        },
+        {
+          "id": "Ch4",
+          "title": "UDP 與通訊端"
+        },
+        {
+          "id": "Ch5",
+          "title": "可靠傳輸協定"
+        },
+        {
+          "id": "Ch6",
+          "title": "TCP 流量與壅塞控制"
+        },
+        {
+          "id": "Ch7",
+          "title": "封包分析實作"
+        },
+        {
+          "id": "Ch8",
+          "title": "IP 位址與子網路"
+        },
+        {
+          "id": "Ch9",
+          "title": "路由與轉送"
+        },
+        {
+          "id": "Ch10",
+          "title": "路由協定"
+        },
+        {
+          "id": "Ch11",
+          "title": "乙太網路與交換器"
+        },
+        {
+          "id": "Ch12",
+          "title": "無線網路"
+        },
+        {
+          "id": "Ch13",
+          "title": "網路安全"
+        },
+        {
+          "id": "Ch14",
+          "title": "網路架構整合複習"
+        }
+      ]
+    }
+  },
+  "grading": [
+    {
+      "category": "exam",
+      "weight": {
+        "value": 60,
+        "status": "estimated",
+        "evidence": "測試假設：模擬考試配分"
+      }
+    },
+    {
+      "category": "homework",
+      "weight": {
+        "value": 40,
+        "status": "estimated",
+        "evidence": "測試假設：兩次模擬作業各占 20%"
+      }
+    }
+  ],
+  "assessments": [
+    {
+      "id": "hw-1",
+      "type": "homework",
+      "title": "練習一：DNS 與電子郵件",
+      "weight": {
+        "value": 20,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-09-28",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 4 週上課日",
+        "week": 4
+      },
+      "scope": {
+        "value": [
+          "Ch2",
+          "Ch3"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "midterm",
+      "type": "exam",
+      "title": "期中評量",
+      "weight": {
+        "value": 30,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-10-26",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 8 週上課日",
+        "week": 8
+      },
+      "scope": {
+        "value": [
+          "Ch1",
+          "Ch2",
+          "Ch3",
+          "Ch4",
+          "Ch5",
+          "Ch6",
+          "Ch7"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "hw-2",
+      "type": "homework",
+      "title": "練習二：路由協定",
+      "weight": {
+        "value": 20,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-11-23",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 12 週上課日",
+        "week": 12
+      },
+      "scope": {
+        "value": [
+          "Ch8",
+          "Ch9",
+          "Ch10"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "final",
+      "type": "exam",
+      "title": "期末評量",
+      "weight": {
+        "value": 30,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-12-21",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 16 週上課日",
+        "week": 16
+      },
+      "scope": {
+        "value": [
+          "Ch8",
+          "Ch9",
+          "Ch10",
+          "Ch11",
+          "Ch12",
+          "Ch13",
+          "Ch14"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    }
+  ],
+  "created_at": "2026-09-06T20:00:00+08:00",
+  "updated_at": "2026-09-06T20:00:00+08:00",
+  "weekly_schedule": [
+    {
+      "week": 1,
+      "date_range": [
+        "2026-09-07",
+        "2026-09-13"
+      ],
+      "topics": [
+        "網路分層、封包與延遲"
+      ],
+      "chapters": [
+        "Ch1"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 2,
+      "date_range": [
+        "2026-09-14",
+        "2026-09-20"
+      ],
+      "topics": [
+        "HTTP 與快取"
+      ],
+      "chapters": [
+        "Ch2"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 3,
+      "date_range": [
+        "2026-09-21",
+        "2026-09-27"
+      ],
+      "topics": [
+        "DNS 與電子郵件"
+      ],
+      "chapters": [
+        "Ch3"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 4,
+      "date_range": [
+        "2026-09-28",
+        "2026-10-04"
+      ],
+      "topics": [
+        "UDP 與通訊端"
+      ],
+      "chapters": [
+        "Ch4"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 5,
+      "date_range": [
+        "2026-10-05",
+        "2026-10-11"
+      ],
+      "topics": [
+        "可靠傳輸協定"
+      ],
+      "chapters": [
+        "Ch5"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 6,
+      "date_range": [
+        "2026-10-12",
+        "2026-10-18"
+      ],
+      "topics": [
+        "TCP 流量與壅塞控制"
+      ],
+      "chapters": [
+        "Ch6"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 7,
+      "date_range": [
+        "2026-10-19",
+        "2026-10-25"
+      ],
+      "topics": [
+        "封包分析實作"
+      ],
+      "chapters": [
+        "Ch7"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 8,
+      "date_range": [
+        "2026-10-26",
+        "2026-11-01"
+      ],
+      "topics": [
+        "期中評量"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 9,
+      "date_range": [
+        "2026-11-02",
+        "2026-11-08"
+      ],
+      "topics": [
+        "IP 位址與子網路"
+      ],
+      "chapters": [
+        "Ch8"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 10,
+      "date_range": [
+        "2026-11-09",
+        "2026-11-15"
+      ],
+      "topics": [
+        "路由與轉送"
+      ],
+      "chapters": [
+        "Ch9"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 11,
+      "date_range": [
+        "2026-11-16",
+        "2026-11-22"
+      ],
+      "topics": [
+        "路由協定"
+      ],
+      "chapters": [
+        "Ch10"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 12,
+      "date_range": [
+        "2026-11-23",
+        "2026-11-29"
+      ],
+      "topics": [
+        "乙太網路與交換器"
+      ],
+      "chapters": [
+        "Ch11"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 13,
+      "date_range": [
+        "2026-11-30",
+        "2026-12-06"
+      ],
+      "topics": [
+        "無線網路"
+      ],
+      "chapters": [
+        "Ch12"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 14,
+      "date_range": [
+        "2026-12-07",
+        "2026-12-13"
+      ],
+      "topics": [
+        "網路安全"
+      ],
+      "chapters": [
+        "Ch13"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 15,
+      "date_range": [
+        "2026-12-14",
+        "2026-12-20"
+      ],
+      "topics": [
+        "網路架構整合複習"
+      ],
+      "chapters": [
+        "Ch14"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 16,
+      "date_range": [
+        "2026-12-21",
+        "2026-12-25"
+      ],
+      "topics": [
+        "期末評量"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    }
+  ]
+}

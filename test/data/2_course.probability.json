@@ -1,0 +1,460 @@
+{
+  "schema_version": "1.5",
+  "user_id": "u_0001",
+  "course_key": "self_probability",
+  "source": {
+    "type": "user_created",
+    "analysis_id": null,
+    "syllabus_url": null,
+    "raw_text_hash": null
+  },
+  "start_date": "2026-09-07",
+  "end_date": "2026-12-25",
+  "course": {
+    "code": "TEST007",
+    "name": "機率與統計",
+    "name_en": "Probability and Statistics",
+    "instructor": "王家慶",
+    "credits": 3,
+    "sessions": [
+      {
+        "weekday": 4,
+        "start_time": "14:00",
+        "end_time": "14:50",
+        "room": "E6-A211"
+      },
+      {
+        "weekday": 4,
+        "start_time": "15:00",
+        "end_time": "15:50",
+        "room": "E6-A211"
+      },
+      {
+        "weekday": 4,
+        "start_time": "16:00",
+        "end_time": "16:50",
+        "room": "E6-A211"
+      }
+    ],
+    "textbook": {
+      "title": "機率與統計講義",
+      "authors": [
+        "模擬教學團隊"
+      ],
+      "edition": 1,
+      "chapters": [
+        {
+          "id": "Ch1",
+          "title": "樣本空間與事件"
+        },
+        {
+          "id": "Ch2",
+          "title": "計數與機率公設"
+        },
+        {
+          "id": "Ch3",
+          "title": "條件機率與貝氏定理"
+        },
+        {
+          "id": "Ch4",
+          "title": "獨立性"
+        },
+        {
+          "id": "Ch5",
+          "title": "離散隨機變數"
+        },
+        {
+          "id": "Ch6",
+          "title": "常見離散分配"
+        },
+        {
+          "id": "Ch7",
+          "title": "連續分配與密度"
+        },
+        {
+          "id": "Ch8",
+          "title": "聯合分配與邊際分配"
+        },
+        {
+          "id": "Ch9",
+          "title": "共變異數與相關"
+        },
+        {
+          "id": "Ch10",
+          "title": "大數法則與中央極限定理"
+        },
+        {
+          "id": "Ch11",
+          "title": "抽樣分配"
+        },
+        {
+          "id": "Ch12",
+          "title": "點估計與信賴區間"
+        },
+        {
+          "id": "Ch13",
+          "title": "假設檢定"
+        },
+        {
+          "id": "Ch14",
+          "title": "迴歸與統計推論複習"
+        }
+      ]
+    }
+  },
+  "grading": [
+    {
+      "category": "exam",
+      "weight": {
+        "value": 60,
+        "status": "estimated",
+        "evidence": "測試假設：模擬考試配分"
+      }
+    },
+    {
+      "category": "homework",
+      "weight": {
+        "value": 40,
+        "status": "estimated",
+        "evidence": "測試假設：兩次模擬作業各占 20%"
+      }
+    }
+  ],
+  "assessments": [
+    {
+      "id": "hw-1",
+      "type": "homework",
+      "title": "練習一：條件機率與貝氏定理",
+      "weight": {
+        "value": 20,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-10-01",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 4 週上課日",
+        "week": 4
+      },
+      "scope": {
+        "value": [
+          "Ch2",
+          "Ch3"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "midterm",
+      "type": "exam",
+      "title": "期中評量",
+      "weight": {
+        "value": 30,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-10-29",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 8 週上課日",
+        "week": 8
+      },
+      "scope": {
+        "value": [
+          "Ch1",
+          "Ch2",
+          "Ch3",
+          "Ch4",
+          "Ch5",
+          "Ch6",
+          "Ch7"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "hw-2",
+      "type": "homework",
+      "title": "練習二：大數法則與中央極限定理",
+      "weight": {
+        "value": 20,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-11-26",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 12 週上課日",
+        "week": 12
+      },
+      "scope": {
+        "value": [
+          "Ch8",
+          "Ch9",
+          "Ch10"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    },
+    {
+      "id": "final",
+      "type": "exam",
+      "title": "期末評量",
+      "weight": {
+        "value": 30,
+        "status": "estimated",
+        "evidence": "測試假設：模擬配分"
+      },
+      "date": {
+        "value": "2026-12-24",
+        "status": "estimated",
+        "evidence": "測試假設：安排在第 16 週上課日",
+        "week": 16
+      },
+      "scope": {
+        "value": [
+          "Ch8",
+          "Ch9",
+          "Ch10",
+          "Ch11",
+          "Ch12",
+          "Ch13",
+          "Ch14"
+        ],
+        "status": "estimated",
+        "evidence": "測試假設：依模擬教學進度取範圍"
+      },
+      "note": null
+    }
+  ],
+  "created_at": "2026-09-06T20:00:00+08:00",
+  "updated_at": "2026-09-06T20:00:00+08:00",
+  "weekly_schedule": [
+    {
+      "week": 1,
+      "date_range": [
+        "2026-09-07",
+        "2026-09-13"
+      ],
+      "topics": [
+        "樣本空間與事件"
+      ],
+      "chapters": [
+        "Ch1"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 2,
+      "date_range": [
+        "2026-09-14",
+        "2026-09-20"
+      ],
+      "topics": [
+        "計數與機率公設"
+      ],
+      "chapters": [
+        "Ch2"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 3,
+      "date_range": [
+        "2026-09-21",
+        "2026-09-27"
+      ],
+      "topics": [
+        "條件機率與貝氏定理"
+      ],
+      "chapters": [
+        "Ch3"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 4,
+      "date_range": [
+        "2026-09-28",
+        "2026-10-04"
+      ],
+      "topics": [
+        "獨立性"
+      ],
+      "chapters": [
+        "Ch4"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 5,
+      "date_range": [
+        "2026-10-05",
+        "2026-10-11"
+      ],
+      "topics": [
+        "離散隨機變數"
+      ],
+      "chapters": [
+        "Ch5"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 6,
+      "date_range": [
+        "2026-10-12",
+        "2026-10-18"
+      ],
+      "topics": [
+        "常見離散分配"
+      ],
+      "chapters": [
+        "Ch6"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 7,
+      "date_range": [
+        "2026-10-19",
+        "2026-10-25"
+      ],
+      "topics": [
+        "連續分配與密度"
+      ],
+      "chapters": [
+        "Ch7"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 8,
+      "date_range": [
+        "2026-10-26",
+        "2026-11-01"
+      ],
+      "topics": [
+        "期中評量"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 9,
+      "date_range": [
+        "2026-11-02",
+        "2026-11-08"
+      ],
+      "topics": [
+        "聯合分配與邊際分配"
+      ],
+      "chapters": [
+        "Ch8"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 10,
+      "date_range": [
+        "2026-11-09",
+        "2026-11-15"
+      ],
+      "topics": [
+        "共變異數與相關"
+      ],
+      "chapters": [
+        "Ch9"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 11,
+      "date_range": [
+        "2026-11-16",
+        "2026-11-22"
+      ],
+      "topics": [
+        "大數法則與中央極限定理"
+      ],
+      "chapters": [
+        "Ch10"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 12,
+      "date_range": [
+        "2026-11-23",
+        "2026-11-29"
+      ],
+      "topics": [
+        "抽樣分配"
+      ],
+      "chapters": [
+        "Ch11"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 13,
+      "date_range": [
+        "2026-11-30",
+        "2026-12-06"
+      ],
+      "topics": [
+        "點估計與信賴區間"
+      ],
+      "chapters": [
+        "Ch12"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 14,
+      "date_range": [
+        "2026-12-07",
+        "2026-12-13"
+      ],
+      "topics": [
+        "假設檢定"
+      ],
+      "chapters": [
+        "Ch13"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 15,
+      "date_range": [
+        "2026-12-14",
+        "2026-12-20"
+      ],
+      "topics": [
+        "迴歸與統計推論複習"
+      ],
+      "chapters": [
+        "Ch14"
+      ],
+      "status": "estimated"
+    },
+    {
+      "week": 16,
+      "date_range": [
+        "2026-12-21",
+        "2026-12-25"
+      ],
+      "topics": [
+        "期末評量"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    }
+  ]
+}

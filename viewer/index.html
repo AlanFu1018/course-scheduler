@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174c42">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" type="module"></script>
+  <script src="/planning-input.js" type="module"></script>
+  <title>學習規劃</title>
+</head>
+<body>
+  <main>
+    <header><h1>學習規劃</h1></header>
+    <form id="planner">
+      <label>使用者 ID <input name="user_id" value="u_0001" required></label>
+      <label>開始日期 <input name="from" type="date" value="2026-09-07" required></label>
+      <label>結束日期 <input name="to" type="date" value="2026-09-13" required></label>
+      <fieldset id="course-picker">
+        <legend>要安排自習的課程</legend>
+        <div id="course-options">正在載入課程…</div>
+        <small>取消勾選會略過該科的自習任務，上課時段仍會避開。</small>
+      </fieldset>
+      <div class="actions">
+        <button type="submit">產生計畫</button>
+      </div>
+    </form>
+    <p id="status" role="status">尚未產生計畫</p>
+    <section class="input-view" aria-labelledby="calendar-heading">
+      <div class="input-heading">
+        <h2 id="calendar-heading">每週行事曆</h2>
+        <div class="actions" id="calendar-controls">
+          <button id="previous-week" type="button">上一週</button>
+          <button id="selected-week" type="button">規劃起始週</button>
+          <button id="next-week" type="button">下一週</button>
+        </div>
+      </div>
+      <div class="calendar-caption">
+        <p id="calendar-range" aria-live="polite"></p>
+        <div class="calendar-legend"><span class="class-key">實線：上課</span><span class="study-key">虛線：學習任務</span></div>
+      </div>
+      <div id="course-legend" class="calendar-legend" aria-label="課程顏色"></div>
+      <div id="calendar-grid" class="calendar-scroll" tabindex="0" aria-label="週行事曆時段"></div>
+    </section>
+    <section id="result" hidden aria-label="規劃成果">
+      <div class="summary">
+        <h2>排程理由</h2>
+        <p id="summary"></p>
+      </div>
+      <section class="input-card task-list"><h2>學習任務</h2><ul id="tasks"></ul></section>
+    </section>
+    <section class="input-view" aria-labelledby="input-heading">
+      <div class="input-heading">
+        <h2 id="input-heading">學習設定</h2>
+        <button id="load-input" type="button">載入資料</button>
+      </div>
+      <p id="input-status" role="status"></p>
+      <div id="input-content" hidden></div>
+    </section>
+  </main>
+</body>
+</html>
