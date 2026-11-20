@@ -489,6 +489,45 @@ function goToSetupTarget(button) {
   window.scrollTo(0, 0);
 }
 
+function handleCourseOption(courseOption) {
+  const section = COURSE_CATALOG.find(item => item.id === courseOption.dataset.courseId);
+  if (!section) return;
+  const alreadySelected = Object.values(state.timetable).some(item => item?.type === "course" && item.sectionId === section.id);
+  if (alreadySelected) {
+    state.activeCell = "";
+    showToast(`「${section.name}・${section.teacher}」已經在課表中。`);
+    return;
+  }
+  const conflicts = sectionConflicts(section);
+  if (conflicts.length) {
+    state.pendingSectionId = section.id;
+    save();
+    render();
+    return;
+  }
+  applySection(section);
+  state.activeCell = "";
+  save();
+  showToast(`已加入「${section.name}」，共填入 ${sectionCells(section).length} 個時段。`);
+}
+
+function bindInteractiveControls(root = document) {
+  root.querySelectorAll("[data-action]:not([data-action-bound])").forEach(button => {
+    button.dataset.actionBound = "true";
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      handleActionButton(button);
+    });
+  });
+  root.querySelectorAll("[data-course-id]:not([data-course-bound])").forEach(button => {
+    button.dataset.courseBound = "true";
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      handleCourseOption(button);
+    });
+  });
+}
+
 function render() {
   document.querySelectorAll(".modal-backdrop").forEach(modal => modal.remove());
   let html;
@@ -499,12 +538,7 @@ function render() {
     html = ({ today: todayPage, calendar: calendarPage, courses: coursesPage, progress: progressPage }[state.route] || todayPage)();
   }
   app.innerHTML = html;
-  app.querySelectorAll("[data-action]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.stopPropagation();
-      handleActionButton(button);
-    });
-  });
+  bindInteractiveControls(app);
   app.querySelectorAll("[data-nav]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
@@ -535,6 +569,7 @@ function render() {
     } else if (state.activeCell) {
       document.body.insertAdjacentHTML("beforeend", coursePicker(state.activeCell));
     }
+    bindInteractiveControls(document.body);
   }
 }
 
@@ -664,7 +699,10 @@ function handleActionButton(actionButton) {
     "finish-setup": () => setState({ setupComplete: true, route: "today" }),
     "complete-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: true } : t); showToast("已記錄完成，進度已更新。 "); },
     "undo-task": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, done: false } : t); setState({ tasks: state.tasks }); },
-    "task-not-done": () => { document.body.insertAdjacentHTML("beforeend", taskModal(id)); },
+    "task-not-done": () => {
+      document.body.insertAdjacentHTML("beforeend", taskModal(id));
+      bindInteractiveControls(document.body);
+    },
     "close-modal": () => { state.activeCell = ""; state.pendingSectionId = ""; document.querySelector(".modal-backdrop")?.remove(); save(); },
     "confirm-replan": () => { state.tasks = state.tasks.map(t => t.id === id ? { ...t, time: "週六 10:00–11:00" } : t); state.replanCount += 1; document.querySelector(".modal-backdrop")?.remove(); showToast("已移到週六上午，其他任務沒有變動。 "); },
     "replan-all": () => { state.replanCount += 1; showToast("已重新檢查空堂，目前計畫仍可完成。 "); },
@@ -778,7 +816,10 @@ document.addEventListener("input", (event) => {
   }
   if (event.target.id !== "course-search") return;
   const results = document.querySelector("#course-results");
-  if (results) results.innerHTML = courseResults(event.target.value);
+  if (results) {
+    results.innerHTML = courseResults(event.target.value);
+    bindInteractiveControls(results);
+  }
 });
 
 document.addEventListener("click", (event) => {
@@ -866,25 +907,7 @@ document.addEventListener("click", (event) => {
   }
   const courseOption = event.target.closest("[data-course-id]");
   if (courseOption) {
-    const section = COURSE_CATALOG.find(item => item.id === courseOption.dataset.courseId);
-    if (!section) return;
-    const alreadySelected = Object.values(state.timetable).some(item => item?.type === "course" && item.sectionId === section.id);
-    if (alreadySelected) {
-      state.activeCell = "";
-      showToast(`「${section.name}・${section.teacher}」已經在課表中。`);
-      return;
-    }
-    const conflicts = sectionConflicts(section);
-    if (conflicts.length) {
-      state.pendingSectionId = section.id;
-      save();
-      render();
-      return;
-    }
-    applySection(section);
-    state.activeCell = "";
-    save();
-    showToast(`已加入「${section.name}」，共填入 ${sectionCells(section).length} 個時段。`);
+    handleCourseOption(courseOption);
     return;
   }
   const actionButton = event.target.closest("[data-action]");
