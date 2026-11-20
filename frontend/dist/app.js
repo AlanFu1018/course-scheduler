@@ -505,6 +505,29 @@ function render() {
       handleActionButton(button);
     });
   });
+  app.querySelectorAll("[data-nav]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      setState({ route: button.dataset.nav });
+    });
+  });
+  app.querySelectorAll("[data-view-mode]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      viewPreference = button.dataset.viewMode;
+      localStorage.setItem(VIEW_MODE_KEY, viewPreference);
+      applyViewMode();
+      render();
+    });
+  });
+  app.querySelectorAll("[data-calendar-day]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      state.calendarDay = button.dataset.calendarDay;
+      save();
+      render();
+    });
+  });
   if (!state.setupComplete && state.setupStep === 1) {
     if (state.pendingSectionId) {
       const section = COURSE_CATALOG.find(item => item.id === state.pendingSectionId);
