@@ -105,7 +105,7 @@
     }
   ],
 
-  // 每週進度；拆任務時用來判斷「某章節何時教完、何時才能開始讀」
+  // 每週進度供任務規劃參考，可安排預習或補讀
   "weekly_schedule": [
     { "week": 1, "date_range": ["2026-09-07", "2026-09-13"], "topics": ["Ch1 Introduction"], "chapters": ["Ch1"], "status": "confirmed" },
     { "week": 2, "date_range": ["2026-09-14", "2026-09-20"], "topics": ["Ch1 Delay, Loss, Throughput"], "chapters": ["Ch1"], "status": "confirmed" }
