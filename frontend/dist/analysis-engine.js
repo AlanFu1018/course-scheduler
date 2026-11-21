@@ -1,12 +1,33 @@
 (function attachMockAnalysisEngine(global) {
   const VERSION = "mock-1.0.0";
-  const SLOTS = [
-    { day: "thu", dateLabel: "11/19（四）", time: "19:00–19:45" },
-    { day: "thu", dateLabel: "11/19（四）", time: "20:00–21:00" },
-    { day: "thu", dateLabel: "11/19（四）", time: "21:10–21:40" },
-    { day: "fri", dateLabel: "11/20（五）", time: "19:00–19:45" },
-    { day: "sat", dateLabel: "11/21（六）", time: "10:00–11:00" },
-  ];
+  const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const DAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
+  function offsetDate(offset) {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    return date;
+  }
+
+  function slotFor(offset, time) {
+    const date = offsetDate(offset);
+    return {
+      day: DAY_KEYS[date.getDay()],
+      dateLabel: `${date.getMonth() + 1}/${date.getDate()}（${DAY_LABELS[date.getDay()]}）`,
+      time,
+    };
+  }
+
+  function planningSlots() {
+    return [
+      slotFor(0, "19:00–19:45"),
+      slotFor(0, "20:00–21:00"),
+      slotFor(0, "21:10–21:40"),
+      slotFor(1, "19:00–19:45"),
+      slotFor(2, "10:00–11:00"),
+    ];
+  }
   const TASK_TEMPLATES = [
     { type: "review", title: "整理本週重點與核心觀念", source: "課綱範圍與熟悉度" },
     { type: "practice", title: "完成章節練習題", source: "課程難度與目標成績" },
@@ -31,7 +52,9 @@
     const courses = input.courses || [];
     const preferences = input.preferences || {};
     const pickedCourses = courses.length ? courses.slice(0, 5) : [{ id: "sample", name: "示範課程", teacher: "", code: "DEMO" }];
-    const tasks = SLOTS.map((slot, index) => {
+    const slots = planningSlots();
+    const todayKey = DAY_KEYS[new Date().getDay()];
+    const tasks = slots.map((slot, index) => {
       const course = pickedCourses[index % pickedCourses.length];
       const preference = preferences[course.id] || {};
       const duration = taskDuration(preference, index);
@@ -50,7 +73,7 @@
         duration,
         estimatedMinutes: duration,
         actualMinutes: null,
-        dueDate: index < 3 ? "11/26 期中評量前" : "本週結束前",
+        dueDate: index < 3 ? "下次評量前" : "本週結束前",
         priority,
         rationale: `${course.name}目前設定為「${preference.familiarity || "普通"}」、難度「${preference.difficulty || "普通"}」，安排在不與固定行程衝突的時段。`,
         status: "pending",
@@ -78,8 +101,8 @@
       summary: {
         totalTasks: tasks.length,
         totalMinutes,
-        todayTasks: tasks.filter(task => task.day === "thu").length,
-        todayMinutes: tasks.filter(task => task.day === "thu").reduce((sum, task) => sum + task.duration, 0),
+        todayTasks: tasks.filter(task => task.day === todayKey).length,
+        todayMinutes: tasks.filter(task => task.day === todayKey).reduce((sum, task) => sum + task.duration, 0),
         highPriorityCourse: courseInsights[0]?.name || "尚未設定",
       },
       courseInsights,

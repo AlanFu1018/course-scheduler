@@ -72,6 +72,47 @@ const DAYS = [
   ["thu", "四"], ["fri", "五"], ["sat", "六"],
 ];
 
+const DAY_SEQUENCE = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_LABELS = { sun: "日", mon: "一", tue: "二", wed: "三", thu: "四", fri: "五", sat: "六" };
+
+function dateForOffset(offset = 0) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + offset);
+  return date;
+}
+
+function dayKeyForDate(date) {
+  return DAY_SEQUENCE[date.getDay()];
+}
+
+function currentDayKey() {
+  return dayKeyForDate(dateForOffset());
+}
+
+function shortDateLabel(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}（${DAY_LABELS[dayKeyForDate(date)]}）`;
+}
+
+function fullDateLabel(date = dateForOffset()) {
+  return `${date.getMonth() + 1}月${date.getDate()}日・星期${DAY_LABELS[dayKeyForDate(date)]}`;
+}
+
+function currentWeekDays() {
+  const today = dateForOffset();
+  const mondayOffset = today.getDay() === 0 ? -6 : 1 - today.getDay();
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + mondayOffset + index);
+    return { day: dayKeyForDate(date), label: DAY_LABELS[dayKeyForDate(date)], date, short: `${date.getMonth() + 1}/${date.getDate()}` };
+  });
+}
+
+function dateLabelForDay(day) {
+  const match = currentWeekDays().find(item => item.day === day);
+  return match ? shortDateLabel(match.date) : shortDateLabel(dateForOffset());
+}
+
 const PERIODS = [
   ["1", "08:00–08:50"], ["2", "09:00–09:50"], ["3", "10:00–10:50"],
   ["4", "11:00–11:50"], ["Z", "12:00–12:50"], ["5", "13:00–13:50"],
@@ -140,8 +181,8 @@ const defaultState = {
 
 function normalizeTask(task, index) {
   return {
-    day: "thu",
-    dateLabel: "11/19（四）",
+    day: currentDayKey(),
+    dateLabel: dateLabelForDay(task.day || currentDayKey()),
     courseId: "",
     type: "review",
     source: "課綱與學習設定",
@@ -152,13 +193,25 @@ function normalizeTask(task, index) {
     rationale: "依課程優先度與可用時段安排。",
     status: task.done ? "done" : "pending",
     ...task,
+    dateLabel: dateLabelForDay(task.day || currentDayKey()),
   };
+}
+
+function migrateLegacyTaskDates(tasks = []) {
+  const hasLegacyDates = tasks.some(task => /^11\/(19|20|21)/.test(String(task.dateLabel || "")) || /^11\/(19|20|21)/.test(String(task.date || "")) || /^11\/(19|20|21)/.test(String(task.dateLabel || "").replace("月", "/")));
+  const hasLegacyChineseDate = tasks.some(task => /^11\/(19|20|21)|^11月(19|20|21)/.test(String(task.dateLabel || "")));
+  if (!hasLegacyDates && !hasLegacyChineseDate) return tasks;
+  const offsets = [0, 0, 0, 1, 2];
+  return tasks.map((task, index) => {
+    const date = dateForOffset(offsets[index] ?? Math.min(index, 2));
+    return { ...task, day: dayKeyForDate(date), dateLabel: shortDateLabel(date) };
+  });
 }
 
 function loadState() {
   try {
     const loaded = { ...structuredClone(defaultState), ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
-    loaded.tasks = (loaded.tasks || []).map(normalizeTask);
+    loaded.tasks = migrateLegacyTaskDates(loaded.tasks || []).map(normalizeTask);
     loaded.planRevisions ||= [];
     loaded.highestSetupStage = Math.max(loaded.highestSetupStage || 1, loaded.setupComplete ? 4 : logicalStageForSetupStep(loaded.setupStep));
     return loaded;
@@ -192,7 +245,8 @@ function viewSwitcher() {
 }
 
 function topbar(title, action = "") {
-  return `<header class="topbar"><div class="topbar-title"><div class="brand">NCU AI 智慧讀書規劃器</div>${title ? `<div class="small muted">${title}</div>` : ""}</div><div class="topbar-actions">${action}${viewSwitcher()}</div></header>`;
+  const settings = state.setupComplete ? `<button type="button" class="topbar-settings" data-action="open-settings" aria-label="開啟設定">設定</button>` : "";
+  return `<header class="topbar"><div class="topbar-title"><div class="brand">NCU AI 智慧讀書規劃器</div>${title ? `<div class="small muted">${title}</div>` : ""}</div><div class="topbar-actions">${action}${settings}${viewSwitcher()}</div></header>`;
 }
 
 function nav() {
@@ -602,37 +656,43 @@ function planReady() {
 }
 
 function todayPage() {
-  const todayTasks = state.tasks.filter(task => task.day === "thu");
+  const todayKey = currentDayKey();
+  const todayTasks = state.tasks.filter(task => task.day === todayKey);
   const complete = todayTasks.filter(task => task.done || task.status === "done").length;
   const pending = todayTasks.filter(task => !task.done && task.status !== "done");
   const nextTask = pending[0];
   const totalMinutes = todayTasks.reduce((sum, task) => sum + task.duration, 0);
-  const upcoming = state.tasks.find(task => task.day !== "thu" && !task.done);
+  const upcoming = pending[1] || state.tasks.find(task => task.day !== todayKey && !task.done && task.status !== "done");
+  const heroAction = nextTask?.status === "in_progress"
+    ? `<button class="btn primary" data-action="complete-task" data-id="${nextTask.id}">完成任務</button>`
+    : `<button class="btn primary" data-action="start-task" data-id="${nextTask?.id}">開始任務</button>`;
   return shell(`<section class="content stack-lg today-dashboard">
     <div class="today-heading"><div><div class="eyebrow">今日</div><h1 class="page-title">${nextTask ? "下一步，先完成這件事" : "今天的任務已完成"}</h1><p class="muted">${state.replanCount ? `本週已調整 ${state.replanCount} 次，新的時段都經過你的確認。` : "完成或回報實際狀況，系統會讓後續安排更準確。"}</p></div><button class="btn ghost small-btn" data-action="replan-all">調整今日計畫</button></div>
     <div class="today-layout">
       <div class="stack-lg">
-        ${nextTask ? `<section class="next-task-card"><div class="row-between"><span class="task-priority">下一個任務</span><span class="small muted">${nextTask.dueDate}</span></div><div><div class="task-time">${nextTask.time}</div><div class="task-course">${nextTask.course}・${nextTask.duration} 分鐘</div><h2>${nextTask.title}</h2><p>${nextTask.rationale}</p></div><div class="next-task-actions"><button class="btn secondary" data-action="task-not-done" data-id="${nextTask.id}">今天做不完</button><button class="btn primary" data-action="complete-task" data-id="${nextTask.id}">完成任務</button></div></section>` : `<section class="card success stack"><strong>做得很好，今天可以休息了。</strong><span class="muted">回顧頁會整理實際投入時間與下週建議。</span></section>`}
+        ${nextTask ? `<section class="next-task-card"><div class="row-between"><span class="task-priority">${nextTask.status === "in_progress" ? "進行中" : "下一個任務"}</span><span class="small muted">${nextTask.dueDate}</span></div><div><div class="task-time">${nextTask.time}</div><div class="task-course">${nextTask.course}・${nextTask.duration} 分鐘</div><h2>${nextTask.title}</h2><p>${nextTask.rationale}</p></div><div class="next-task-actions"><button class="btn secondary" data-action="task-not-done" data-id="${nextTask.id}">今天做不完</button>${heroAction}<button class="btn ghost" data-action="open-task-detail" data-id="${nextTask.id}">查看詳情</button></div></section>` : `<section class="card success stack"><strong>做得很好，今天可以休息了。</strong><span class="muted">回顧頁會整理實際投入時間與下週建議。</span></section>`}
         <section class="stack"><div class="row-between"><h2 class="section-title">今日時間軸</h2><span class="small muted">${complete}／${todayTasks.length} 已完成</span></div>${todayTasks.map(task => taskCard(task, task.id === nextTask?.id)).join("")}</section>
       </div>
-      <aside class="today-side stack"><section class="card soft stack"><div class="row-between"><strong>今日完成度</strong><span>${complete}／${todayTasks.length}</span></div><div class="progress"><span style="width:${todayTasks.length ? Math.round(complete / todayTasks.length * 100) : 100}%"></span></div><div class="row-between small muted"><span>預計投入</span><span>${Math.floor(totalMinutes / 60)} 小時 ${totalMinutes % 60} 分</span></div></section><section class="card stack"><div class="eyebrow">接下來</div><strong>${upcoming ? `${upcoming.dateLabel}・${upcoming.course}` : "本週沒有其他任務"}</strong><span class="small muted">${upcoming ? upcoming.title : "可以保留彈性時間"}</span><button class="btn secondary block" data-nav="calendar">查看完整計畫</button></section></aside>
+      <aside class="today-side stack"><section class="card soft stack"><div class="row-between"><strong>今日完成度</strong><span>${complete}／${todayTasks.length}</span></div><div class="progress"><span style="width:${todayTasks.length ? Math.round(complete / todayTasks.length * 100) : 100}%"></span></div><div class="row-between small muted"><span>預計投入</span><span>${Math.floor(totalMinutes / 60)} 小時 ${totalMinutes % 60} 分</span></div></section><section class="card stack"><div class="eyebrow">接下來</div><strong>${upcoming ? `${upcoming.day === todayKey ? upcoming.time : upcoming.dateLabel}・${upcoming.course}` : "本週沒有其他任務"}</strong><span class="small muted">${upcoming ? upcoming.title : "可以保留彈性時間"}</span><button class="btn secondary block" data-nav="calendar">查看完整計畫</button></section></aside>
     </div>
-  </section>`, "11月19日・星期四", `<span class="engine-badge">Mock Analysis</span>`);
+  </section>`, fullDateLabel(), `<span class="engine-badge">Mock Analysis</span>`);
 }
 
 function taskCard(task, highlighted = false) {
   const done = task.done || task.status === "done";
-  return `<article class="task compact ${highlighted ? "highlighted" : ""} ${done ? "done" : ""}"><button class="task-main" data-action="open-task-detail" data-id="${task.id}"><span class="task-time">${task.time}</span><span><strong>${task.title}</strong><small>${task.course}・${task.duration} 分鐘</small></span><span class="task-state">${done ? "已完成" : task.priority === "high" ? "優先" : "待完成"}</span></button>${done ? `<button class="btn ghost small-btn" data-action="undo-task" data-id="${task.id}">復原</button>` : ""}</article>`;
+  const statusLabel = done ? "已完成" : task.status === "in_progress" ? "進行中" : task.status === "rescheduled" ? "已改期" : "待完成";
+  const priorityLabel = task.priority === "high" ? "高優先" : task.priority === "low" ? "低優先" : "一般";
+  return `<article class="task compact ${highlighted ? "highlighted" : ""} ${done ? "done" : ""}"><button class="task-main" data-action="open-task-detail" data-id="${task.id}"><span class="task-time">${task.time}</span><span><strong>${task.title}</strong><small>${task.course}・${task.duration} 分鐘</small></span><span class="task-labels"><span class="task-priority-label ${task.priority}">${priorityLabel}</span><span class="task-state ${task.status}">${statusLabel}</span></span></button>${done ? `<button class="btn ghost small-btn" data-action="undo-task" data-id="${task.id}">復原</button>` : ""}</article>`;
 }
 
 function calendarPage() {
-  const days = [["mon", "一", "11/16"], ["tue", "二", "11/17"], ["wed", "三", "11/18"], ["thu", "四", "11/19"], ["fri", "五", "11/20"], ["sat", "六", "11/21"], ["sun", "日", "11/22"]];
-  const dayColumn = ([day, label, date]) => {
+  const days = currentWeekDays();
+  const dayColumn = ({ day, label, short: date }) => {
     const courseItems = selectedSections().flatMap(section => section.meetings.filter(meeting => meeting.day === day).map(meeting => `<div class="plan-item course"><span>課程</span><strong>${section.name}</strong><small>${formatMeeting(meeting).replace(`週${label} `, "")}</small></div>`));
     const customItems = Object.entries(state.timetable).filter(([cell, item]) => cell.startsWith(`${day}-`) && item?.type === "custom").map(([cell, item]) => `<div class="plan-item custom"><span>行程</span><strong>${item.title}</strong><small>第 ${cell.split("-")[1]} 節</small></div>`);
     const taskItems = state.tasks.filter(task => task.day === day).map(task => `<button class="plan-item study ${task.done ? "done" : ""}" data-action="open-task-detail" data-id="${task.id}"><span>讀書</span><strong>${task.course}</strong><small>${task.time}・${task.title}</small></button>`);
     const items = [...courseItems, ...customItems, ...taskItems].join("") || `<div class="plan-empty">保留彈性</div>`;
-    return `<section class="plan-day ${day === "thu" ? "today" : ""}"><header><span>週${label}</span><strong>${date}</strong></header><div class="plan-day-items">${items}</div></section>`;
+    return `<section class="plan-day ${day === currentDayKey() ? "today" : ""}"><header><span>週${label}</span><strong>${date}</strong></header><div class="plan-day-items">${items}</div></section>`;
   };
   return shell(`<section class="content stack-lg plan-page"><div class="row-between plan-heading"><div><div class="eyebrow">本週計畫</div><h1 class="page-title">課程、生活與讀書任務</h1><p class="muted">AI 任務不會覆蓋學校課程與固定生活行程。</p></div><button class="btn primary" data-action="replan-all">重新規劃</button></div><section class="card ai-plan-summary"><div><span class="status ai">Mock AI</span><strong>目前負擔適中</strong><p>高優先任務排在較早的空堂，週末保留調整空間。</p></div><button class="btn secondary" data-action="show-analysis-reasons">查看排程依據</button></section><div class="week-plan">${days.map(dayColumn).join("")}</div></section>`, "計畫");
 }
@@ -688,13 +748,25 @@ function completionModal(id) {
 }
 
 function replanPreviewModal(task, reason, progress = "0") {
-  const nextTime = task.day === "thu" ? "週六 10:00–11:00" : "週日 14:00–15:00";
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal stack-lg replan-preview"><div><div class="eyebrow">重排預覽</div><h2 class="page-title">確認後才會修改計畫</h2><p class="muted">Mock Analysis Engine 根據你的回報產生以下建議。</p></div><div class="plan-diff"><div><span>原安排</span><strong>${task.dateLabel} ${task.time}</strong></div><div class="diff-line"></div><div><span>建議調整</span><strong>${nextTime}</strong></div></div><div class="card soft small"><strong>原因：</strong>${reason}，目前完成 ${progress}%。未完成部分移到週末彈性時段，其他固定行程不變。</div><div class="button-grid"><button class="btn secondary" data-action="close-modal">保留原計畫</button><button class="btn primary" data-action="confirm-replan" data-id="${task.id}">確認套用</button></div></section></div>`;
+  const suggestedDate = dateForOffset(1);
+  const nextTime = `週${DAY_LABELS[dayKeyForDate(suggestedDate)]} 10:00–11:00`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal stack-lg replan-preview"><div><div class="eyebrow">重排預覽</div><h2 class="page-title">確認後才會修改計畫</h2><p class="muted">Mock Analysis Engine 根據你的回報產生以下建議。</p></div><div class="plan-diff"><div><span>原安排</span><strong>${task.dateLabel} ${task.time}</strong></div><div class="diff-line"></div><div><span>建議調整</span><strong>${nextTime}</strong></div></div><div class="card soft small"><strong>原因：</strong>${reason}，目前完成 ${progress}%。未完成部分移到下一個彈性時段，其他固定行程不變。</div><div class="button-grid"><button class="btn secondary" data-action="close-modal">保留原計畫</button><button class="btn primary" data-action="confirm-replan" data-id="${task.id}">確認套用</button></div></section></div>`;
 }
 
 function taskDetailModal(id) {
   const task = state.tasks.find(item => item.id === id);
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true"><section class="modal stack-lg"><div class="row-between"><div><div class="eyebrow">任務詳情</div><h2 class="page-title">${task.title}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="detail-pairs"><span>科目<strong>${task.course}</strong></span><span>預估時間<strong>${task.duration} 分鐘</strong></span><span>截止時間<strong>${task.dueDate}</strong></span><span>任務來源<strong>${task.source}</strong></span></div><div class="card primary-soft small"><strong>AI 排程理由</strong><br>${task.rationale}</div></section></div>`;
+  if (!task) return "";
+  const done = task.done || task.status === "done";
+  const action = done
+    ? `<button class="btn secondary" data-action="undo-task" data-id="${task.id}">標記為未完成</button>`
+    : task.status === "in_progress"
+      ? `<button class="btn primary" data-action="complete-task" data-id="${task.id}">完成任務</button>`
+      : `<button class="btn primary" data-action="start-task" data-id="${task.id}">開始任務</button>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="task-detail-title"><section class="modal stack-lg"><div class="row-between"><div><div class="eyebrow">任務詳情</div><h2 id="task-detail-title" class="page-title">${task.title}</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><div class="task-detail-status"><span class="task-priority-label ${task.priority}">${task.priority === "high" ? "高優先" : task.priority === "low" ? "低優先" : "一般優先"}</span><span class="task-state ${task.status}">${done ? "已完成" : task.status === "in_progress" ? "進行中" : task.status === "rescheduled" ? "已改期" : "待完成"}</span></div><div class="detail-pairs"><span>科目<strong>${task.course}</strong></span><span>安排時間<strong>${task.dateLabel} ${task.time}</strong></span><span>預估時間<strong>${task.duration} 分鐘</strong></span><span>截止時間<strong>${task.dueDate}</strong></span><span>任務來源<strong>${task.source}</strong></span><span>任務類型<strong>${task.type === "practice" ? "練習" : task.type === "preview" ? "預習" : "複習"}</strong></span></div><div class="card primary-soft small"><strong>AI 排程理由</strong><br>${task.rationale}</div><div class="task-detail-actions">${!done ? `<button class="btn secondary" data-action="task-not-done" data-id="${task.id}">今天做不完</button>` : ""}${action}</div></section></div>`;
+}
+
+function settingsModal() {
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校、系所與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>熟悉度、難度、目標與單次長度</small></span><span>修改</span></button></div></section></div>`;
 }
 
 function goToSetupTarget(button) {
@@ -878,6 +950,10 @@ function handleActionButton(actionButton) {
   const action = actionButton.dataset.action;
   const id = Number(actionButton.dataset.id);
   const actions = {
+    "open-settings": () => openDynamicModal(settingsModal()),
+    "settings-profile": () => setState({ setupComplete: false, setupStep: 0 }),
+    "settings-timetable": () => setState({ setupComplete: false, setupStep: 1 }),
+    "settings-learning": () => setState({ setupComplete: false, setupStep: 4 }),
     "goto-setup-step": () => goToSetupTarget(actionButton),
     "open-cell": () => {
       state.activeCell = actionButton.dataset.cell;
@@ -950,6 +1026,11 @@ function handleActionButton(actionButton) {
     "back-assessment": () => setState({ setupStep: 3 }),
     "back-availability": () => setState({ setupComplete: false, setupStep: 4 }),
     "finish-setup": () => setState({ setupComplete: true, route: "today" }),
+    "start-task": () => {
+      state.tasks = state.tasks.map(task => task.id === id ? { ...task, status: "in_progress", startedAt: new Date().toISOString() } : task);
+      document.querySelector(".modal-backdrop")?.remove();
+      showToast("任務已開始；完成後記得回報實際花費時間。");
+    },
     "complete-task": () => openDynamicModal(completionModal(id)),
     "confirm-complete": () => {
       const form = document.querySelector("#completion-form");
@@ -975,9 +1056,12 @@ function handleActionButton(actionButton) {
     "close-modal": () => { state.activeCell = ""; state.pendingSectionId = ""; state.pendingReplan = null; document.querySelector(".modal-backdrop")?.remove(); save(); },
     "confirm-replan": () => {
       const before = state.tasks.find(task => task.id === id);
-      state.tasks = state.tasks.map(task => task.id === id ? { ...task, day: "sat", dateLabel: "11/21（六）", time: "10:00–11:00", status: "rescheduled" } : task);
+      const suggestedDate = dateForOffset(1);
+      const suggestedDay = dayKeyForDate(suggestedDate);
+      const suggestedLabel = shortDateLabel(suggestedDate);
+      state.tasks = state.tasks.map(task => task.id === id ? { ...task, day: suggestedDay, dateLabel: suggestedLabel, time: "10:00–11:00", status: "rescheduled" } : task);
       state.replanCount += 1;
-      state.planRevisions.push({ id: Date.now(), taskId: id, reason: state.pendingReplan?.reason || "整體負擔調整", before: `${before?.dateLabel} ${before?.time}`, after: "11/21（六） 10:00–11:00", applied: true });
+      state.planRevisions.push({ id: Date.now(), taskId: id, reason: state.pendingReplan?.reason || "整體負擔調整", before: `${before?.dateLabel} ${before?.time}`, after: `${suggestedLabel} 10:00–11:00`, applied: true });
       state.pendingReplan = null;
       document.querySelector(".modal-backdrop")?.remove();
       showToast("已套用重排，固定課程與生活行程沒有變動。");
@@ -1251,7 +1335,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=32", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=33", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
