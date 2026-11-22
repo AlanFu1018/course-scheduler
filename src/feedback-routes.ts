@@ -2,16 +2,18 @@
 //   POST /api/tasks/{task_id}/completions             回報完成 → 更新速度與掌握度 → 需要時加排複習 → 判斷是否重排
 //   POST /api/plans/latest/missed                     檢查過了時間沒回報的時段 → 判斷是否重排
 //   PUT  /api/users/{user_id}/courses/{course_key}    使用者主觀調整熟悉度、難度、目標成績 → 判斷是否重排
-// 回應裡的 reschedule.needed = true 時，前端用 reschedule.scope 呼叫 POST /api/plans 重新排程
+//   POST /api/plans/latest/reschedule                 部分重排：保留已完成與鎖定的部分，其餘沿用任務重新放進時段
+// 回應裡的 reschedule.needed = true 時，前端請使用者確認，再呼叫 POST /api/plans/latest/reschedule
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
 import { check } from './data.ts';
-import type { UserCourse } from './data.ts';
+import type { PlanningSource, UserCourse } from './data.ts';
 import { errorStatus, RequestError } from './errors.ts';
 import { afterCompletion, afterMissed, afterUserAdjust, applyCompletion, localDate, markMissed, parseCompletion,
   rescheduleScope, reviewDeadline, reviewTask, updateUserCourse } from './feedback.ts';
 import type { Block, FeedbackTask, RescheduleDecision } from './feedback.ts';
+import { reschedulePlan } from './reschedule.ts';
 
 export type RouteHandler = (request: IncomingMessage, response: ServerResponse, path: string) => Promise<boolean>;
 type StoredPlan = { schedule: { plan_id: string; user_id: string; scope: { from: string; to: string } };
@@ -49,7 +51,8 @@ const id = (value: unknown, label: string) => {
  * @param plans    存計畫的資料庫（.planning-checkpoints.sqlite 的 saved_plans）
  * @param planning 存學習狀況的資料庫（PLANNING_DB_PATH 的 user_courses）；沒有時無法保存學習狀況
  */
-export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | null, options: { now?: () => Date } = {}): RouteHandler {
+export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | null,
+  options: { now?: () => Date; source?: PlanningSource } = {}): RouteHandler {
   const now = options.now ?? (() => new Date());
 
   function latestPlan(userId: string): StoredPlan | null {
@@ -129,6 +132,37 @@ export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | nul
     return { status: 200, data: { missed_blocks: result.missed_blocks, missed_tasks: result.missed_tasks, reschedule: withScope(decision, plan) } };
   }
 
+  async function reschedule(body: Record<string, unknown>) {
+    const userId = id(body.user_id, 'user_id');
+    check(options.source, '伺服器沒有設定課程資料來源，無法重排');
+    const plan = latestPlan(userId);
+    if (!plan) return { status: 404, data: { error: '這個使用者還沒有計畫' } };
+    const triggers = ['completion_feedback', 'user_adjust', 'course_update', 'calendar_update', 'missed_tasks', 'user_request'];
+    const trigger = (body.trigger ?? 'user_request') as never;
+    check(triggers.includes(trigger), '無效的重排原因');
+    check(body.action === undefined || body.action === 'reschedule' || body.action === 'accept_pending', '無效的 action');
+    const input = await options.source.load(userId);
+    const result = reschedulePlan(plan as never, input, {
+      now: now(), trigger, trigger_ref: typeof body.trigger_ref === 'string' ? body.trigger_ref : null,
+      action: body.action as 'reschedule' | 'accept_pending' | undefined,
+    });
+    if (result.status !== 'rescheduled') return { status: 200, data: result };
+    const next = result.plan;
+    plans.exec('BEGIN IMMEDIATE');
+    try {
+      plans.prepare('INSERT INTO saved_plans(plan_id, user_id, created_at, data) VALUES (?, ?, ?, ?)')
+        .run(next.schedule.plan_id, userId, String(next.schedule.created_at), JSON.stringify(next));
+      // 舊版不刪，只標成 superseded 保留歷史
+      plan.schedule = { ...plan.schedule, status: 'superseded' } as never;
+      savePlan(plan);
+      plans.exec('COMMIT');
+    } catch (error) {
+      plans.exec('ROLLBACK');
+      throw error;
+    }
+    return { status: 201, data: result };
+  }
+
   function adjust(userId: string, courseKey: string, body: Record<string, unknown>) {
     const before = userCourse(userId, courseKey);
     if (!before) return { status: 404, data: { error: '找不到這門課的學習狀況' } };
@@ -157,6 +191,8 @@ export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | nul
       const adjustment = /^\/api\/users\/([^/]+)\/courses\/([^/]+)$/.exec(path);
       if (method === 'POST' && completion) {
         result = complete(id(decodeURIComponent(completion[1]), 'task_id'), await readJson(request));
+      } else if (method === 'POST' && path === '/api/plans/latest/reschedule') {
+        result = await reschedule(await readJson(request));
       } else if (method === 'POST' && path === '/api/plans/latest/missed') {
         result = missed(await readJson(request));
       } else if (method === 'PUT' && adjustment) {
