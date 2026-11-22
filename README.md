@@ -25,6 +25,19 @@
 
 重新排程及接受待排使用 `POST /api/plans/drafts/{draft_id}/decision`，JSON 請求為 `{ "user_id": "u_0001", "action": "reschedule" }` 或將 `action` 設為 `"accept_pending"`。兩者都重新讀取目前設定、沿用已產生的任務，無須呼叫 Gemini。`reschedule` 若仍有缺口，以相同草稿 ID 回傳更新後的數字。成功排程會沿用原計畫 ID 與建立時間，儲存完整計畫和各階段資料，並刪除草稿。草稿不存在或屬於其他帳號時回傳 HTTP 404。
 
+## 依目前狀況重新排程
+
+有計畫後可按「依目前狀況重新排程」，或呼叫 `POST /api/plans/latest/adjust`，傳入 `{ "user_id": "u_0001" }`。完成回饋或漏做檢查回傳 `reschedule.needed` 時，可將其中的 `trigger` 和 `trigger_ref` 一併送到 `reschedule.endpoint`。尚無計畫時回傳 HTTP 404。
+
+調整流程不呼叫 Gemini。程式從使用者時區的今天排到原計畫結束日，沿用任務 ID、完成紀錄與自動加入的複習任務。它依目前速度、難度與章節掌握度更新估時，扣除已完成的比例與已鎖定時段，並保留已完成時段。完成重排時會儲存新版本，將原計畫標為 `superseded`，可從新版本的 `supersedes` 查回原計畫。
+
+若時間不足，回應會帶有 `needs_decision` 草稿。調整可用時間後，使用同一個草稿決定端點送出 `reschedule`，或用 `accept_pending` 接受待排。程式會重新讀取原計畫的最新回饋與目前設定。原計畫已被其他版本取代時，草稿決定會回傳 HTTP 409。
+
+- `POST /api/tasks/{task_id}/skip` 接收 `{ "user_id": "u_0001" }`，將最新計畫中尚未完成的任務標為跳過，並取消它後續的已排時段。
+- `POST /api/tasks/{task_id}/extend` 另需 `deadline`（YYYY-MM-DD），用於已過截止日的錯過任務。新期限須介於今天與課程結束日之間。成功後任務變為待排，按重新排程即可安排。兩個端點均回傳更新後的任務。
+
+重排、跳過及延期均可使用預設測試資料，變更保存在本機 checkpoints 資料庫。完成回報仍需設定 `PLANNING_DB_PATH` 才能保存個人學習狀況。
+
 ## 歷次計畫
 
 完成的計畫和三階段資料存入本機 `.planning-checkpoints.sqlite`，以使用者 ID 和計畫 ID 查詢。頁面重新整理會載入最近一次成功的計畫。以下唯讀端點均需傳入 `?user_id=…`。

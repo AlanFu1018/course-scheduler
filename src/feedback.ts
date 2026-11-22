@@ -1,7 +1,9 @@
 // 動態調整：完成回饋 → 更新學習狀況 → 判斷是否需要重新排程
 // 對應模組圖下方：#1 完成紀錄與學習回饋、⑤ 學習狀況設定、使用者主觀調整、是否需要重新排程
 // 規則依 doc/3_user_state.jsonc（speed、chapter_mastery）與 doc/5_tasks.jsonc（completions、auto_review）
-import { isDate } from './data.ts';
+import { isDate, timeMinutes } from './data.ts';
+import { DIFFICULTY_MULT, MASTERY_MULT, estimateBasis, estimatedMinutes, speedFor } from './estimate.ts';
+import type { Estimate } from './estimate.ts';
 import type { UserCourse } from './data.ts';
 import { RequestError } from './errors.ts';
 
@@ -10,6 +12,7 @@ export type Completion = {
   completed_at: string;
   on_time: boolean;
   estimated_minutes: number;
+  speed_factor?: number;
   actual_minutes: number;
   difficulty: number;
   understanding: Record<string, number>;
@@ -20,7 +23,7 @@ export type Completion = {
 export type FeedbackTask = {
   task_id: string; user_id: string; course_key: string; assessment_id: string | null;
   type: string; title: string; chapters: string[]; deadline: string;
-  estimate: { minutes: number; [key: string]: number };
+  estimate: Estimate & { minutes: number };
   status: string; source?: string; parent_task_id?: string | null;
   completions: Completion[]; updated_at?: string; [key: string]: unknown;
 };
@@ -39,11 +42,6 @@ export const ESTIMATE_TOLERANCE = { low: 0.75, high: 1.33 };
 export const REVIEW_LEVEL = 2;
 // 移動平均的權重：新樣本占 30%，避免一次異常就大幅改變
 const SPEED_ALPHA = 0.3;
-// 同一類型樣本數 ≥ 3 才用該類型的速度，否則用整體速度（3_user_state 註解）
-const TYPE_SAMPLES = 3;
-
-const DIFFICULTY_MULT = [0.8, 0.9, 1.0, 1.1, 1.2];
-const MASTERY_MULT = [1.3, 1.2, 1.0, 0.9, 0.8];
 const REVIEW_BASE_MINUTES = 30;
 
 const level = (value: unknown) => Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 5;
@@ -52,7 +50,7 @@ const level = (value: unknown) => Number.isInteger(value) && (value as number) >
 // 1. 完成紀錄
 // ---------------------------------------------------------------------------
 
-export function parseCompletion(task: FeedbackTask, body: Record<string, unknown>, now: Date): Completion {
+export function parseCompletion(task: FeedbackTask, body: Record<string, unknown>, now: Date, blocks: Block[] = []): Completion {
   const actual = body.actual_minutes;
   if (!(Number.isInteger(actual) && (actual as number) > 0 && (actual as number) <= 24 * 60)) {
     throw new RequestError('actual_minutes 必須是 1–1440 的整數');
@@ -70,13 +68,17 @@ export function parseCompletion(task: FeedbackTask, body: Record<string, unknown
   const completedAt = typeof body.completed_at === 'string' ? body.completed_at : now.toISOString();
   if (!Number.isFinite(Date.parse(completedAt))) throw new RequestError('completed_at 格式錯誤');
   const comment = typeof body.comment === 'string' && body.comment.trim() ? body.comment.trim().slice(0, 1000) : null;
+  const blockId = typeof body.block_id === 'string' ? body.block_id : null;
+  const block = blocks.find(b => b.block_id === blockId && b.task_id === task.task_id);
+  if (blockId !== null && !block) throw new RequestError('此時段不屬於這個任務');
   return {
-    block_id: typeof body.block_id === 'string' ? body.block_id : null,
+    block_id: blockId,
     completed_at: completedAt,
     // 以台灣日期判斷是否在期限內完成
     on_time: localDate(completedAt) <= task.deadline,
     // 回報當下的預估時間快照：之後重排改掉 estimate，速度仍用這個值計算
-    estimated_minutes: task.estimate.minutes,
+    estimated_minutes: block ? timeMinutes(block.end_time) - timeMinutes(block.start_time) : task.estimate.minutes,
+    speed_factor: task.estimate.speed_factor,
     actual_minutes: actual as number,
     difficulty: body.difficulty as number,
     understanding,
@@ -104,7 +106,7 @@ export function applyCompletion(task: FeedbackTask, blocks: Block[], completion:
     if (completion.block_id === null || block.block_id === completion.block_id) return { ...block, status: 'done' };
     return block;
   });
-  const allDone = updatedBlocks.filter(block => block.task_id === task.task_id).every(block => block.status === 'done');
+  const allDone = !task.unplaced_minutes && updatedBlocks.filter(block => block.task_id === task.task_id).every(block => block.status === 'done');
   const updatedTask: FeedbackTask = {
     ...task,
     status: completion.block_id === null || allDone ? 'done' : task.status,
@@ -124,10 +126,10 @@ type Speed = { factor: number; samples: number };
  * 實際 ÷ 預估 > 1 代表讀得比預估慢。預估已經乘過舊的速度係數，
  * 所以這次觀察到的係數是「舊係數 × 比值」，再用移動平均併入。
  */
-export function nextSpeed(speed: Speed, estimated: number, actual: number): Speed {
+export function nextSpeed(speed: Speed, estimated: number, actual: number, usedFactor = speed.factor): Speed {
   const ratio = Math.min(2.5, Math.max(0.4, actual / estimated));
-  const observed = speed.factor * ratio;
-  const factor = speed.samples === 0 ? observed : speed.factor * (1 - SPEED_ALPHA) + observed * SPEED_ALPHA;
+  const observed = usedFactor * ratio;
+  const factor = speed.factor * (1 - SPEED_ALPHA) + observed * SPEED_ALPHA;
   return { factor: Math.round(Math.min(3, Math.max(0.3, factor)) * 100) / 100, samples: speed.samples + 1 };
 }
 
@@ -136,9 +138,11 @@ export function updateUserCourse(state: UserCourse & Record<string, unknown>, ta
   now: Date) {
   const next = structuredClone(state) as UserCourse & Record<string, unknown>;
   const stamp = now.toISOString();
-  next.speed.default = nextSpeed(next.speed.default, completion.estimated_minutes, completion.actual_minutes);
-  const byType = next.speed.by_task_type[task.type] ?? { factor: state.speed.default.factor, samples: 0 };
-  next.speed.by_task_type[task.type] = nextSpeed(byType, completion.estimated_minutes, completion.actual_minutes);
+  const observe = (speed: Speed) => nextSpeed(speed, completion.estimated_minutes, completion.actual_minutes,
+    completion.speed_factor ?? task.estimate.speed_factor);
+  const byType = state.speed.by_task_type[task.type];
+  next.speed.default = observe(state.speed.default);
+  next.speed.by_task_type[task.type] = observe(byType?.samples ? byType : { factor: state.speed.default.factor, samples: 0 });
 
   const scores: Record<string, number> = '_all' in completion.understanding
     ? Object.fromEntries(task.chapters.map(chapter => [chapter, completion.understanding._all]))
@@ -157,15 +161,11 @@ export function updateUserCourse(state: UserCourse & Record<string, unknown>, ta
 
 /** 依目前的熟悉度與速度估複習時間（公式與 5_tasks 相同，四捨五入到 5 分） */
 export function reviewEstimate(state: UserCourse, chapters: string[]) {
-  const levels = chapters.map(chapter => state.chapter_mastery[chapter]?.level ?? state.familiarity);
-  const worst = Math.min(...levels);
-  const typeSpeed = state.speed.by_task_type.review;
-  const speed = typeSpeed && typeSpeed.samples >= TYPE_SAMPLES ? typeSpeed.factor : state.speed.default.factor;
-  const base = REVIEW_BASE_MINUTES * chapters.length;
-  const difficulty = DIFFICULTY_MULT[state.difficulty - 1];
-  const familiarity = MASTERY_MULT[worst - 1];
-  const minutes = Math.max(15, Math.round(base * difficulty * familiarity * speed / 5) * 5);
-  return { base_minutes: base, difficulty_mult: difficulty, familiarity_mult: familiarity, speed_factor: speed, minutes };
+  const basis = estimateBasis(state, chapters);
+  const estimate = { base_minutes: REVIEW_BASE_MINUTES * chapters.length, basis,
+    difficulty_mult: DIFFICULTY_MULT[basis.difficulty - 1], familiarity_mult: MASTERY_MULT[basis.familiarity_level - 1],
+    speed_factor: speedFor(state, 'review') };
+  return { ...estimate, minutes: estimatedMinutes(estimate) };
 }
 
 /** 需要複習的章節 → 自動加一個 auto_review 任務，狀態 pending，等下次排程排進時段 */
@@ -209,7 +209,7 @@ export function reviewDeadline(parent: FeedbackTask, today: string, courseEnd: s
 // ---------------------------------------------------------------------------
 
 /** 時段結束時間已過、還是 planned → 標成 missed；任務本身沒完成也沒其他未來時段 → 任務標 missed */
-export function markMissed(tasks: FeedbackTask[], blocks: Block[], now: Date, timeZone = 'Asia/Taipei') {
+export function markMissed<T extends FeedbackTask, B extends Block>(tasks: T[], blocks: B[], now: Date, timeZone = 'Asia/Taipei') {
   const nowLocal = localDate(now.toISOString(), timeZone) + ' ' + new Intl.DateTimeFormat('en-GB', {
     timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
   const missedBlocks: string[] = [];
@@ -287,13 +287,12 @@ export function afterCourseUpdate(courseKey: string, before: { id: string; date:
  * 重排時要交給排程的範圍（4_schedule 的重排規則）：
  *   從今天開始；done / skipped / superseded 的任務不動；locked 的時段原樣保留
  */
-export function rescheduleScope(tasks: FeedbackTask[], blocks: Block[], today: string, to: string) {
+export function rescheduleScope(tasks: FeedbackTask[], blocks: Block[], today: string, to: string, course_keys: string[] = []) {
   if (!isDate(today) || !isDate(to)) throw new RequestError('重排日期格式錯誤');
   const keepLocked = blocks.filter(block => block.locked && (block.status ?? 'planned') === 'planned' && block.date >= today);
-  const lockedTasks = new Set(keepLocked.map(block => block.task_id));
-  const carry = tasks.filter(task => ['pending', 'scheduled', 'missed'].includes(task.status) && !lockedTasks.has(task.task_id));
+  const carry = tasks.filter(task => ['pending', 'scheduled', 'missed'].includes(task.status));
   return {
-    scope: { from: today, to, course_keys: [] as string[] },
+    scope: { from: today, to, course_keys },
     carry_task_ids: carry.map(task => task.task_id),
     locked_block_ids: keepLocked.map(block => block.block_id),
   };

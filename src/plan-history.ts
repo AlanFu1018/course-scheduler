@@ -19,9 +19,17 @@ export function planHistory(db: DatabaseSync) {
   return {
     save(result: FinalPlan, steps: { step: string; data: string }[]) {
       const {plan_id, user_id, created_at} = result.schedule;
+      if (result.schedule.supersedes) {
+        db.prepare("UPDATE saved_plans SET data=json_set(data,'$.schedule.status','superseded') WHERE user_id=? AND plan_id=?")
+          .run(user_id, result.schedule.supersedes);
+      }
       insert.run(plan_id, user_id, created_at, JSON.stringify(result));
       const saveStep = db.prepare('INSERT INTO saved_plan_steps(plan_id,step,data) VALUES(?,?,?)');
       for (const { step, data } of steps) saveStep.run(plan_id, step, data);
+    },
+    update(result: FinalPlan) {
+      db.prepare('UPDATE saved_plans SET data=? WHERE user_id=? AND plan_id=?')
+        .run(JSON.stringify(result), result.schedule.user_id, result.schedule.plan_id);
     },
     read(userId: string, planId?: string): FinalPlan | null {
       const row = planId === undefined

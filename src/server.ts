@@ -3,12 +3,15 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
-import { check, filePlanningSource, sqlitePlanningSource } from './data.ts';
+import { check, filePlanningSource, isDate, sqlitePlanningSource } from './data.ts';
 import type { PlanningSource } from './data.ts';
 import { GeminiLlmService, GeminiUnavailable } from './llm.ts';
 import { errorStatus, RequestError } from './errors.ts';
 import { generateInitialPlan, planFromDraft } from './planner.ts';
-import type { FinalPlan } from './planner.ts';
+import type { DraftAction, FinalPlan } from './planner.ts';
+import { generateAdjustedPlan } from './adjust.ts';
+import { localParts } from './availability.ts';
+import type { Trigger } from './feedback.ts';
 import { checkpointRun, loadDraft } from './checkpoints.ts';
 import { planHistory } from './plan-history.ts';
 import { planningInputView } from './planning-input-view.ts';
@@ -43,26 +46,33 @@ async function requestBody(request: IncomingMessage) {
     check(body.length <= 16_384, '請求過大');
   }
   try {
-    return JSON.parse(body) as { user_id?: string; scope?: Scope; action?: string };
+    return JSON.parse(body) as { user_id?: string; scope?: Scope; action?: DraftAction; trigger?: Trigger;
+      trigger_ref?: string | null; deadline?: string };
   } catch (error) {
     throw new RequestError('請求不是有效的 JSON', { cause: error });
   }
 }
 
-export function createPlanningServer(source: PlanningSource, checkpoints: DatabaseSync, extraRoutes?: RouteHandler) {
+export function createPlanningServer(source: PlanningSource, checkpoints: DatabaseSync, extraRoutes?: RouteHandler,
+  now = () => new Date()) {
   const progress = new Map<string, string>();
   const history = planHistory(checkpoints);
 
-  function saveFinal(plan: FinalPlan, run: ReturnType<typeof checkpointRun>) {
+  function transaction<T>(work: () => T): T {
     checkpoints.exec('BEGIN IMMEDIATE');
     try {
-      history.save(plan, run.completedSteps());
-      run.finish();
+      const result = work();
       checkpoints.exec('COMMIT');
+      return result;
     } catch (error) {
       checkpoints.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  function saveFinal(plan: FinalPlan, run: ReturnType<typeof checkpointRun>) {
+    history.save(plan, run.completedSteps());
+    run.finish();
   }
 
   return createServer(async (request, response) => {
@@ -112,7 +122,7 @@ export function createPlanningServer(source: PlanningSource, checkpoints: Databa
           }, log);
           const result = await generateInitialPlan(input, body.scope, llm, new Date(), run);
           if ('schedule' in result) {
-            saveFinal(result, run);
+            transaction(() => saveFinal(result, run));
             log(`規劃完成：${result.tasks.length} 項任務、${result.schedule_blocks.length} 個時段`);
           } else {
             log(result.message);
@@ -127,14 +137,18 @@ export function createPlanningServer(source: PlanningSource, checkpoints: Databa
         return;
       }
       const decision = /^\/api\/plans\/drafts\/([^/]+)\/decision$/.exec(path);
-      if (request.method === 'POST' && decision) {
+      if (request.method === 'POST' && (decision || path === '/api/plans/latest/adjust')) {
         const body = await requestBody(request);
         const id = body?.user_id;
         check(typeof id === 'string' && id.trim(), '需要使用者 ID');
-        check(body.action === 'reschedule' || body.action === 'accept_pending', '無效的草稿決定');
-        const saved = loadDraft(checkpoints, id, decision[1]);
-        if (!saved) {
+        if (decision) check(body.action === 'reschedule' || body.action === 'accept_pending', '無效的草稿決定');
+        const saved = decision ? loadDraft(checkpoints, id, decision[1]) : null;
+        if (decision && !saved) {
           json(response, 404, { error: '找不到此使用者的草稿' });
+          return;
+        }
+        if (!decision && !history.read(id)) {
+          json(response, 404, { error: '這個使用者還沒有計畫' });
           return;
         }
         if (progress.has(id)) {
@@ -143,12 +157,83 @@ export function createPlanningServer(source: PlanningSource, checkpoints: Databa
         }
         progress.set(id, '讀取目前設定並重新排程');
         try {
-          const result = planFromDraft(await source.load(id), saved.draft, body.action);
-          if ('schedule' in result) saveFinal(result, saved.run);
-          json(response, 200, result);
+          const input = await source.load(id);
+          const reply = transaction(() => {
+            const draft = saved?.draft;
+            if (draft && !('previous_plan_id' in draft)) {
+              const result = planFromDraft(input, draft, body.action!);
+              if ('schedule' in result) saveFinal(result, saved!.run);
+              return { status: 200, data: result };
+            }
+            const previous = history.read(id)!;
+            if (draft && draft.previous_plan_id !== previous.schedule.plan_id) {
+              return { status: 409, data: { error: '此草稿的原計畫已被取代，請依最新計畫重排' } };
+            }
+            const trigger = draft?.trigger ?? body.trigger ?? 'user_adjust';
+            check(['completion_feedback', 'user_adjust', 'course_update', 'calendar_update', 'missed_tasks'].includes(trigger), '無效的重排原因');
+            const trigger_ref = draft ? draft.trigger_ref : body.trigger_ref ?? null;
+            check(trigger_ref === null || typeof trigger_ref === 'string', '無效的觸發來源');
+            const at = now();
+            const result = generateAdjustedPlan(input, previous, { ...draft, now: at, trigger, trigger_ref },
+              decision ? body.action : 'reschedule');
+            const plan_id = 'schedule' in result ? result.schedule.plan_id : result.draft_id;
+            const run = saved?.run ?? checkpointRun(checkpoints, ['adjust', id, plan_id], () => {});
+            if ('schedule' in result) saveFinal(result, run);
+            else run.saveDraft({ plan_id, user_id: id, created_at: draft?.created_at ?? at.toISOString(),
+              previous_plan_id: previous.schedule.plan_id, trigger, trigger_ref });
+            return { status: 200, data: result };
+          });
+          json(response, reply.status, reply.data);
         } finally {
           progress.delete(id);
         }
+        return;
+      }
+      const editTask = /^\/api\/tasks\/([^/]+)\/(skip|extend)$/.exec(path);
+      if (request.method === 'POST' && editTask) {
+        const body = await requestBody(request);
+        const id = body?.user_id;
+        check(typeof id === 'string' && id.trim(), '需要使用者 ID');
+        const taskId = decodeURIComponent(editTask[1]);
+        if (!history.read(id)?.tasks.some(t => t.task_id === taskId)) {
+          json(response, 404, { error: '在最新的計畫裡找不到這個任務' });
+          return;
+        }
+        const input = await source.load(id);
+        const updated = transaction(() => {
+          const plan = history.read(id)!;
+          const task = plan.tasks.find(t => t.task_id === taskId);
+          if (!task) return null;
+          const at = now();
+          const local = localParts(input.user.timezone).format(at);
+          const today = local.slice(0, 10);
+          if (editTask[2] === 'extend') {
+            check(task.status === 'missed' && task.deadline < today, '只能延後已過期限的錯過任務');
+            const course = input.courses.find(c => c.course_key === task.course_key);
+            check(course && isDate(body.deadline) && today <= body.deadline && body.deadline <= course.end_date,
+              '新期限須介於今天與課程結束日之間');
+            task.deadline = body.deadline;
+            task.status = 'pending';
+          } else {
+            check(task.status !== 'done', '已完成的任務不能跳過');
+            task.status = 'skipped';
+            for (const b of plan.schedule_blocks) {
+              if (b.task_id === taskId && (b.status ?? 'planned') === 'planned' && b.date + 'T' + b.start_time >= local) b.status = 'cancelled';
+            }
+          }
+          task.updated_at = at.toISOString();
+          delete task.pending_reason;
+          for (const note of plan.notes ?? []) {
+            const index = note.issue_task_ids?.indexOf(taskId) ?? -1;
+            if (index >= 0) {
+              note.issue_task_ids!.splice(index, 1);
+              note.issues.splice(index, 1);
+            }
+          }
+          history.update(plan);
+          return task;
+        });
+        json(response, updated ? 200 : 404, updated ?? { error: '在最新的計畫裡找不到這個任務' });
         return;
       }
       if (request.method === 'GET' && path === '/api/planning-progress') {

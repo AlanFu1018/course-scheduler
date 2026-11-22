@@ -5,6 +5,7 @@ export type Scope = { from: string; to: string; course_keys: string[] };
 export type Day = {
   date: string; slots: Slot[]; daily_max_minutes: number; session_minutes: number;
   break_minutes: number; exam_buffer_days: number;
+  reserved_minutes?: number;
 };
 
 export function shiftDate(date: string, days: number): string {
@@ -13,7 +14,7 @@ export function shiftDate(date: string, days: number): string {
   return time.toISOString().slice(0, 10);
 }
 
-function localParts(timezone: string) {
+export function localParts(timezone: string) {
   const formatter = new Intl.DateTimeFormat('en', {
     timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',

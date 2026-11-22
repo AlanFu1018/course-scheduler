@@ -5,23 +5,27 @@ import { check, isDate, timeMinutes } from './data.ts';
 import type { Course, PlanningInput } from './data.ts';
 import type { LlmService } from './llm.ts';
 import { GeminiResponseError, RequestError } from './errors.ts';
-import { scheduleTasks, dateRestriction, isExamPreparation,
+import { blockMinutes, dayCapacity, scheduleTasks, dateRestriction, isExamPreparation,
   minimumBlock, minimumStudyMinutes, reviewTypes, weekStart, shortDate } from './scheduler.ts';
 import { assessShortfall } from './shortfall.ts';
-import type { Block } from './scheduler.ts';
+import type { Block, SavedBlock } from './scheduler.ts';
+import { estimateBasis, estimatedMinutes } from './estimate.ts';
+import type { Estimate } from './estimate.ts';
+import type { Completion, Trigger } from './feedback.ts';
 
 const taskTypes = ['reading', 'notes', 'examples', 'past_exam', 'mock_exam', 'error_review', 'final_review', 'homework', 'review'] as const;
 const phases = ['learn', 'practice', 'sprint'] as const;
-type Estimate = { base_minutes: number; difficulty_mult: number; familiarity_mult: number; speed_factor: number };
 type TaskDraft = {
   course_key: string; assessment_id: string | null; type: typeof taskTypes[number];
   phase: typeof phases[number]; title: string; chapters: string[]; estimate: Estimate;
   deadline: string; priority: number; reason: string;
 };
-type Task = Omit<TaskDraft, 'estimate'> & {
+export type Task = Omit<TaskDraft, 'estimate'> & {
   estimate: Estimate & { minutes: number }; task_id: string; user_id: string; plan_id: string;
-  schema_version: string; status: 'pending' | 'scheduled'; source: 'ai'; parent_task_id: null;
-  pending_reason?: string; completions: []; created_at: string; updated_at: string;
+  schema_version: string; status: 'pending' | 'scheduled' | 'done' | 'missed' | 'skipped' | 'superseded';
+  source: 'ai' | 'auto_review' | 'user'; parent_task_id: string | null;
+  remaining_minutes?: number; unplaced_minutes?: number; pending_reason?: string;
+  completions: Completion[]; created_at: string; updated_at: string;
 };
 
 const string = { type: 'string' };
@@ -47,8 +51,7 @@ function isDateBounds(value: unknown, first: string, last: string) {
 }
 
 function estimateMinutes(estimate: Estimate) {
-  const { base_minutes, difficulty_mult, familiarity_mult, speed_factor } = estimate;
-  const minutes = Math.round(base_minutes * difficulty_mult * familiarity_mult * speed_factor / 5) * 5;
+  const minutes = estimatedMinutes(estimate);
   check(Number.isSafeInteger(minutes) && minutes > 0, '公式算出的估時必須為正整數');
   return minutes;
 }
@@ -93,22 +96,32 @@ function validateTask(task: TaskDraft, courses: Course[], scope: Scope, log: Pla
 }
 
 type PlacementTask = Pick<Task, 'task_id' | 'title' | 'course_key' | 'assessment_id' | 'type' | 'phase' | 'deadline' | 'status'>
-  & { estimate: { minutes: number } };
+  & { estimate: { minutes: number }; remaining_minutes?: number };
 
-export function validatePlacement(blocks: Block[], tasks: PlacementTask[], days: Day[], courses: Course[]) {
+export function validatePlacement(blocks: (Block & Partial<SavedBlock>)[], tasks: PlacementTask[], days: Day[], courses: Course[]) {
   const taskById = new Map(tasks.map(task => [task.task_id, task]));
   const dayByDate = new Map(days.map(day => [day.date, day]));
   const totals = new Map<string, number>();
-  const blocksByDate = new Map<string, { start: number; end: number; label: string }[]>();
+  const locked = new Map<string, number>();
+  const blocksByDate = new Map<string, { start: number; end: number; label: string; fixed: boolean }[]>();
   const errors: string[] = [];
   for (const block of blocks) {
     const task = taskById.get(block.task_id);
     const day = dayByDate.get(block.date);
-    if (!task || !day) throw new Error('時段引用了未知任務或不可排日期');
+    if (!task) throw new Error('時段引用了未知任務');
     const start = timeMinutes(block.start_time);
     const end = timeMinutes(block.end_time);
     const duration = end - start;
     const label = `${task.title}（${block.date} ${block.start_time}–${block.end_time}）`;
+    const fixed = block.status === 'done' || Boolean(block.locked && (block.status ?? 'planned') === 'planned');
+    const intervals = blocksByDate.get(block.date) ?? [];
+    intervals.push({ start, end, label, fixed });
+    blocksByDate.set(block.date, intervals);
+    if (fixed) {
+      if (block.status !== 'done') locked.set(task.task_id, (locked.get(task.task_id) ?? 0) + duration);
+      continue;
+    }
+    if (!day) throw new Error('時段引用了不可排日期');
     if (duration < minimumBlock(day) || duration > day.session_minutes) {
       errors.push(`${label}：長度 ${duration} 分鐘，每段須為 ${minimumBlock(day)} 至 ${day.session_minutes} 分鐘`);
     }
@@ -118,25 +131,24 @@ export function validatePlacement(blocks: Block[], tasks: PlacementTask[], days:
     const course = courses.find(course => course.course_key === task.course_key)!;
     const restriction = dateRestriction(task, course, day);
     if (restriction) errors.push(`${label}：${restriction}`);
-    const intervals = blocksByDate.get(block.date) ?? [];
-    intervals.push({ start, end, label });
-    blocksByDate.set(block.date, intervals);
     totals.set(task.task_id, (totals.get(task.task_id) ?? 0) + duration);
   }
   for (const [date, intervals] of blocksByDate) {
+    if (intervals.every(b => b.fixed)) continue;
     const day = dayByDate.get(date)!;
     intervals.sort((a, b) => a.start - b.start);
     const used = intervals.reduce((sum, interval) => sum + interval.end - interval.start, 0);
     if (used > day.daily_max_minutes) errors.push(`${date}：共 ${used} 分鐘，超過單日上限 ${day.daily_max_minutes} 分鐘`);
     for (let index = 1; index < intervals.length; index++) {
       const gap = intervals[index].start - intervals[index - 1].end;
-      if (gap < day.break_minutes) {
+      if (gap < day.break_minutes && !(intervals[index].fixed && intervals[index - 1].fixed)) {
         errors.push(`${intervals[index - 1].label} 與 ${intervals[index].label}：${gap < 0 ? '重疊' : `只間隔 ${gap} 分鐘`}，須間隔至少 ${day.break_minutes} 分鐘`);
       }
     }
   }
   for (const task of tasks) {
-    const expected = task.status === 'scheduled' ? task.estimate.minutes : 0;
+    const expected = task.status === 'scheduled'
+      ? Math.max(0, (task.remaining_minutes ?? task.estimate.minutes) - (locked.get(task.task_id) ?? 0)) : 0;
     if ((totals.get(task.task_id) ?? 0) !== expected) errors.push(task.title + ' 的排程分鐘數不符');
   }
   if (errors.length) throw new Error(errors.join('\n'));
@@ -277,7 +289,8 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
       }));
     for (const { draft, focus, id } of rows) {
       focusesById[id] = focus;
-      tasks.push({ ...draft, estimate: { ...draft.estimate, minutes: estimateMinutes(draft.estimate) },
+      const basis = estimateBasis(states.find(state => state.course_key === draft.course_key)!, draft.chapters);
+      tasks.push({ ...draft, estimate: { ...draft.estimate, minutes: estimateMinutes(draft.estimate), basis },
         task_id: id, schema_version: '1.5', user_id, plan_id, created_at, updated_at: created_at,
         source: 'ai', parent_task_id: null, status: 'pending', completions: [] });
     }
@@ -291,44 +304,68 @@ export async function generateInitialPlan(input: PlanningInput, scope: Scope, ll
 
 export type DraftAction = 'reschedule' | 'accept_pending';
 
-export function planFromDraft(input: PlanningInput, draft: PlanDraft, action: DraftAction, progress?: PlanningRun['progress']) {
+export type AdjustmentRef = { previous_plan_id: string; trigger: Trigger; trigger_ref: string | null };
+type Adjustment = AdjustmentRef & {
+  fixed: SavedBlock[]; getDays: typeof availableDays; demand: Task[];
+  forecast: (available: number) => string; changes: (tasks: Task[]) => string;
+};
+
+export function planFromDraft(input: PlanningInput, draft: PlanDraft, action: DraftAction, progress?: PlanningRun['progress'],
+  adjustment?: Adjustment) {
   const courses = input.courses.filter(c => Object.hasOwn(draft.targetGrades, c.course_key));
   check(courses.length === Object.keys(draft.targetGrades).length, '草稿引用的課程已變更，請重新產生計畫');
-  const days = availableDays(input, draft.scope);
+  const getDays = adjustment?.getDays ?? availableDays;
+  const days = getDays(input, draft.scope);
+  const demand = adjustment?.demand ?? draft.tasks;
   if (action === 'reschedule') {
-    const shortfall = assessShortfall(input, draft, courses, days);
+    const shortfall = assessShortfall(input, { ...draft, tasks: demand }, courses, days, getDays);
     if (shortfall) return { status: 'needs_decision' as const, draft_id: draft.plan_id, scope: draft.scope,
-      tasks: draft.tasks, ...shortfall };
+      tasks: draft.tasks, ...shortfall, message: shortfall.message +
+        (adjustment?.forecast(days.reduce((sum, day) => sum + dayCapacity(day), 0)) ?? '') };
   }
   progress?.('依截止日安排學習時段');
-  return finalizePlan(draft, courses, days);
+  return finalizePlan(draft, demand, courses, days, adjustment);
 }
 
-function finalizePlan(draft: PlanDraft, courses: Course[], days: Day[]) {
+function finalizePlan(draft: PlanDraft, demand: Task[], courses: Course[], days: Day[], adjustment?: Adjustment) {
   const { plan_id, created_at, user_id, scope, focuses, batches } = draft;
   const tasks = draft.tasks.map(task => ({ ...task }));
-  const placement = scheduleTasks(tasks.map(task => ({
+  const placement = scheduleTasks(demand.map(task => ({
     ...task, target_week: weekStart(focuses[task.task_id].from),
   })), courses, days);
   const reasons = new Map(placement.pending.map(p => [p.task_id, p.reason]));
+  const requested = new Map(demand.map(t => [t.task_id, t.estimate.minutes]));
   for (const task of tasks) {
-    if (reasons.has(task.task_id)) task.pending_reason = reasons.get(task.task_id);
-    else task.status = 'scheduled';
+    if (task.status !== 'pending') continue;
+    if (reasons.has(task.task_id)) {
+      task.pending_reason = reasons.get(task.task_id);
+      if (adjustment) task.unplaced_minutes = requested.get(task.task_id);
+    } else task.status = 'scheduled';
   }
   try {
-    validatePlacement(placement.blocks, tasks, days, courses);
+    validatePlacement([...(adjustment?.fixed ?? []), ...placement.blocks], tasks, days, courses);
   } catch (error) {
     throw new Error('排程自我檢查失敗：' + (error as Error).message, { cause: error });
   }
   const preview = new Set(placement.blocks.filter(b => b.date < weekStart(focuses[b.task_id].from)).map(b => b.task_id));
+  const placed = new Map<string, number>();
+  const schedule_blocks = [...(adjustment?.fixed ?? []), ...placement.blocks.map(block => ({
+    ...block, block_id: `b_${randomUUID()}`, user_id, locked: false, status: 'planned',
+  }))].sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time));
+  for (const block of schedule_blocks) {
+    if (block.status !== 'done') placed.set(block.task_id, (placed.get(block.task_id) ?? 0) + blockMinutes(block));
+  }
   const notes = batches.map(batch => {
     const from = batch[0].from, to = batch.at(-1)!.to;
-    const scheduled = tasks.filter(t => t.status === 'scheduled' && batch.some(w => w.from === focuses[t.task_id].from));
-    const minutes = scheduled.reduce((sum, t) => sum + t.estimate.minutes, 0);
+    const scheduled = tasks.filter(t => t.status === 'scheduled' && (adjustment || batch.some(w => w.from === focuses[t.task_id].from)));
+    const minutes = scheduled.reduce((sum, t) => sum + (placed.get(t.task_id) ?? 0), 0);
     const early = scheduled.filter(t => preview.has(t.task_id)).length;
-    const issues = tasks.filter(t => t.pending_reason && from <= t.deadline && t.deadline <= to)
-      .map(t => `${t.title}（${t.estimate.minutes} 分鐘，${shortDate(t.deadline)} 截止）：${t.pending_reason}`);
-    return { from, to, summary: `排入 ${scheduled.length} 項任務共 ${minutes} 分鐘，其中 ${early} 項提前預習。`, issues };
+    const unresolved = tasks.filter(t => t.pending_reason && (t.status === 'pending' || t.status === 'missed')
+      && (adjustment || (from <= t.deadline && t.deadline <= to)));
+    const issues = unresolved.map(t => `${t.title}（${t.estimate.minutes} 分鐘，${shortDate(t.deadline)} 截止）：${t.pending_reason}`);
+    const changes = adjustment ? '\n' + adjustment.changes(tasks) : '';
+    return { from, to, summary: `排入 ${scheduled.length} 項任務共 ${minutes} 分鐘，其中 ${early} 項提前預習。` + changes,
+      issues, ...(adjustment && { issue_task_ids: unresolved.map(t => t.task_id) }) };
   });
   const pending = placement.pending.length;
   const summary = [
@@ -339,26 +376,24 @@ function finalizePlan(draft: PlanDraft, courses: Course[], days: Day[]) {
     course_key: string; assessment_id: string; minutes: number; reason: string;
   }>();
   for (const task of tasks) {
-    if (task.status !== 'scheduled' || task.assessment_id === null) continue;
+    if (!placed.has(task.task_id) || task.assessment_id === null) continue;
     const { course_key, assessment_id, reason } = task;
     const key = JSON.stringify([course_key, assessment_id]);
     const entry = allocationByAssessment.get(key) ?? { course_key, assessment_id, minutes: 0, reason };
-    entry.minutes += task.estimate.minutes;
+    entry.minutes += placed.get(task.task_id) ?? 0;
     allocationByAssessment.set(key, entry);
   }
   const total = [...allocationByAssessment.values()].reduce((sum, entry) => sum + entry.minutes, 0);
   return {
     schedule: {
-      schema_version: '1.5', plan_id, user_id, created_at, status: 'active', supersedes: null,
-      trigger: 'initial', trigger_ref: null, scope, summary,
+      schema_version: '1.5', plan_id, user_id, created_at, status: 'active', supersedes: adjustment?.previous_plan_id ?? null,
+      trigger: adjustment?.trigger ?? 'initial', trigger_ref: adjustment?.trigger_ref ?? null, scope, summary,
       allocation: [...allocationByAssessment.values()].map(entry => ({ ...entry, share: entry.minutes / total })),
       task_ids: tasks.map(task => task.task_id), model: draft.model,
     },
     tasks,
     notes,
-    schedule_blocks: placement.blocks.map(block => ({
-      ...block, block_id: `b_${randomUUID()}`, user_id, locked: false, status: 'planned',
-    })).sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time)),
+    schedule_blocks,
   };
 }
 

@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { PlanDraft, PlanningRun } from './planner.ts';
+import type { AdjustmentRef, PlanDraft, PlanningRun } from './planner.ts';
+
+type AdjustDraft = Pick<PlanDraft, 'plan_id' | 'user_id' | 'created_at'> & AdjustmentRef;
 
 function ensureDraftTable(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS plan_drafts (
@@ -12,7 +14,7 @@ export function loadDraft(db: DatabaseSync, userId: string, draftId: string) {
   ensureDraftTable(db);
   const row = db.prepare('SELECT run,data FROM plan_drafts WHERE user_id=? AND draft_id=?').get(userId, draftId);
   if (!row) return null;
-  return { draft: JSON.parse(String(row.data)) as PlanDraft, run: keyedRun(db, String(row.run), () => {}) };
+  return { draft: JSON.parse(String(row.data)) as PlanDraft | AdjustDraft, run: keyedRun(db, String(row.run), () => {}) };
 }
 
 export function checkpointRun(db: DatabaseSync, inputs: unknown, progress: PlanningRun['progress'], log?: PlanningRun['log']) {
@@ -36,7 +38,7 @@ function keyedRun(db: DatabaseSync, key: string, progress: PlanningRun['progress
       db.prepare('INSERT INTO planning_steps VALUES (?, ?, ?)').run(key, name, JSON.stringify(value));
       return value;
     },
-    saveDraft(draft: PlanDraft) {
+    saveDraft(draft: PlanDraft | AdjustDraft) {
       db.prepare('INSERT INTO plan_drafts VALUES(?,?,?,?,?) ON CONFLICT(draft_id) DO UPDATE SET data=excluded.data')
         .run(draft.plan_id, draft.user_id, key, draft.created_at, JSON.stringify(draft));
     },

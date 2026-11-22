@@ -731,6 +731,9 @@ test('checkpoint resume reuses weekly analysis and respects the later focus week
     assert.deepEqual(stages,['analysis','tasks','tasks']);
     assert.equal(result.tasks[0].status,'scheduled');
     assert.equal(result.tasks[0].estimate.minutes,90);
+    const state = input.user_courses.find(c => c.course_key === 'self_networks')!;
+    assert.deepEqual(result.tasks[0].estimate, { ...draft.estimate, minutes: 90,
+      basis: { difficulty: state.difficulty, familiarity_level: state.chapter_mastery.Ch4?.level ?? state.familiarity } });
     assert.ok(result.schedule_blocks.length >= 2);
     assert.equal(result.schedule_blocks[0].task_id,result.schedule_blocks[1].task_id);
     assert.ok(!('target_week' in result.tasks[0]));

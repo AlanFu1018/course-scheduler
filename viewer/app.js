@@ -56,6 +56,39 @@ function element(tag, text, className) {
   return node;
 }
 
+function missedControls(task) {
+  const controls = element('div', undefined, 'actions');
+  const date = element('input');
+  date.type = 'date';
+  date.setAttribute('aria-label', task.title + '的新期限');
+  const skip = element('button', '跳過'), extend = element('button', '延後期限');
+  async function edit(action) {
+    if (submit.disabled) return;
+    if (action === 'extend' && !date.value) {
+      date.required = true;
+      date.reportValidity();
+      return;
+    }
+    const revision = ++viewRevision;
+    submit.disabled = true;
+    try {
+      const response = await fetch(`/api/tasks/${encodeURIComponent(task.task_id)}/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userField.value.trim(), ...(action === 'extend' && { deadline: date.value }) }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error);
+      if (revision !== viewRevision) return;
+      await loadLatestPlan(userField.value.trim(), revision);
+    } catch (error) {
+      if (revision === viewRevision) status.textContent = error.message;
+    } finally { submit.disabled = false; }
+  }
+  skip.addEventListener('click', () => edit('skip'));
+  extend.addEventListener('click', () => edit('extend'));
+  controls.append(skip, date, extend);
+  return controls;
+}
+
 function renderSummary(plan) {
   const container = document.querySelector('#summary');
   const notes = plan.notes;
@@ -71,13 +104,18 @@ function renderSummary(plan) {
       const details = element('details', undefined, 'summary-issues');
       details.append(element('summary', `有 ${note.issues.length} 項任務未排入`));
       const list = element('ul');
-      list.append(...note.issues.map(issue => element('li', issue)));
+      list.append(...note.issues.map((issue, index) => {
+        const row = element('li', issue);
+        const task = plan.tasks.find(t => t.task_id === note.issue_task_ids?.[index]);
+        if (task?.status === 'missed' && task.deadline < plan.schedule.scope.from) row.append(missedControls(task));
+        return row;
+      }));
       details.append(list);
       item.append(details);
     }
     return item;
   });
-  const pending = plan.tasks.filter(task => task.status !== 'scheduled');
+  const pending = plan.tasks.filter(task => task.status === 'pending');
   const children = [element('ol', undefined, 'summary-periods')];
   children[0].append(...items);
   if (!items.length) children[0].append(element('li', plan.schedule.summary));
@@ -160,6 +198,7 @@ function renderDecision(plan) {
 }
 
 function showPlan(plan) {
+  const labels = { scheduled: '已排', pending: '待排', done: '已完成', missed: '已錯過', skipped: '已跳過', superseded: '已取代' };
   draftId = plan.status === 'needs_decision' ? plan.draft_id : null;
   decisionPanel.hidden = !draftId;
   document.querySelector('#result .summary').hidden = Boolean(draftId);
@@ -167,18 +206,21 @@ function showPlan(plan) {
   else renderSummary(plan);
   renderList('#tasks', plan.tasks.map(task => [
     task.title,
-    `${task.status === 'scheduled' ? '已排' : '待排'} · ${task.estimate.minutes} 分鐘 · 截止 ${task.deadline}\n${task.pending_reason ?? task.reason}`,
+    `${labels[task.status] ?? task.status} · ${task.estimate.minutes} 分鐘 · 截止 ${task.deadline}\n${task.pending_reason ?? task.reason}`,
     task.course_key,
   ]), '沒有學習任務');
   setCalendarPlan(plan);
   result.hidden = false;
 }
 
-async function restorePlan() {
+function restorePlan() {
   const id = userField.value.trim();
   try { sessionStorage.setItem('course-scheduler.current-user', id); } catch { /* Optional tab storage. */ }
   if (!id || submit.disabled || draftId) return;
-  const revision = ++viewRevision;
+  return loadLatestPlan(id, ++viewRevision);
+}
+
+async function loadLatestPlan(id, revision) {
   try {
     const response = await fetch('/api/plans/latest?' + new URLSearchParams({ user_id: id }));
     const plan = await response.json();
@@ -237,14 +279,15 @@ async function generatePlan(user_id, from, to, course_keys) {
   }
 }
 
-async function decide(action) {
-  if (!draftId || submit.disabled) return;
+async function adjustPlan(action) {
+  if (submit.disabled || (action && !draftId)) return;
   const revision = ++viewRevision;
   submit.disabled = true;
   decisionButtons.forEach(button => { button.disabled = true; });
   status.textContent = '正在依目前設定重新排程…';
   try {
-    const response = await fetch(`/api/plans/drafts/${encodeURIComponent(draftId)}/decision`, {
+    const path = action ? `/api/plans/drafts/${encodeURIComponent(draftId)}/decision` : '/api/plans/latest/adjust';
+    const response = await fetch(path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userField.value.trim(), action }),
     });
@@ -260,7 +303,8 @@ async function decide(action) {
     decisionButtons.forEach(button => { button.disabled = false; });
   }
 }
-decisionButtons.forEach(button => button.addEventListener('click', () => decide(button.dataset.action)));
+decisionButtons.forEach(button => button.addEventListener('click', () => adjustPlan(button.dataset.action)));
+document.querySelector('#adjust-plan').addEventListener('click', () => adjustPlan());
 
 form.addEventListener('submit', event => {
   event.preventDefault();

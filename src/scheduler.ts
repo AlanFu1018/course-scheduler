@@ -8,6 +8,11 @@ type SchedulerTask = DateTask & {
   task_id: string; course_key: string; priority: number; target_week: string; estimate: { minutes: number };
 };
 export type Block = { task_id: string; date: string; start_time: string; end_time: string };
+export type SavedBlock = Block & { block_id: string; user_id: string; locked: boolean; status: string };
+
+export function blockMinutes(block: Block) {
+  return timeMinutes(block.end_time) - timeMinutes(block.start_time);
+}
 
 export const reviewTypes = new Set<string>(['past_exam', 'mock_exam', 'error_review', 'final_review', 'review']);
 const examPrepTypes = new Set<string>(['past_exam', 'mock_exam', 'final_review']);
@@ -23,7 +28,11 @@ function usableWidths(day: Day) {
 }
 
 export function dayCapacity(day: Day) {
-  return Math.min(day.daily_max_minutes, usableWidths(day).reduce((sum, width) => sum + width, 0));
+  return Math.min(dailyQuota(day), usableWidths(day).reduce((sum, width) => sum + width, 0));
+}
+
+function dailyQuota(day: Day) {
+  return Math.max(0, day.daily_max_minutes - (day.reserved_minutes ?? 0));
 }
 
 export function isExamPreparation(task: DateTask) {
@@ -130,6 +139,21 @@ function freeIntervals(day: Day, busy: Interval[]) {
 
 type Segment = Interval & { previous: Segment | null };
 
+// Subtract fixed study sessions (including their breaks) from every candidate
+// timetable, including the hypothetical timetables used for shortfall advice.
+export function reserveStudyTime(days: Day[], blocks: Block[], today: string, earliest: number): Day[] {
+  return days.map(day => {
+    const fixed = blocks.filter(b => b.date === day.date);
+    const busy = fixed.map(b => ({ start: timeMinutes(b.start_time), end: timeMinutes(b.end_time) }))
+      .sort((a, b) => a.start - b.start);
+    const slots = freeIntervals(day, busy).flatMap(gap => {
+      const start = day.date === today ? Math.max(earliest, gap.start) : gap.start;
+      return start < gap.end ? [{ start_time: clock(start), end_time: clock(gap.end) }] : [];
+    });
+    return { ...day, slots, reserved_minutes: fixed.reduce((sum, b) => sum + blockMinutes(b), 0) };
+  }).filter(day => day.slots.length);
+}
+
 // For each attainable minute total, keep the earliest finish. A later finish
 // cannot open up any additional slots for the next segment of this task.
 function dayOptions(day: Day, busy: Interval[], limit: number) {
@@ -160,7 +184,7 @@ function pack(task: SchedulerTask, days: Day[], calendar: Calendar, caps: Map<st
   for (const day of days) {
     const busy = calendar.get(day.date) ?? [];
     const used = busy.reduce((sum, b) => sum + b.end - b.start, 0);
-    const cap = Math.min(day.daily_max_minutes, caps.get(day.date)! + extra);
+    const cap = Math.min(dailyQuota(day), caps.get(day.date)! + extra);
     const limit = Math.min(total, cap - used);
     if (limit < minimumBlock(day)) continue;
     const options = dayOptions(day, busy, limit);
@@ -187,7 +211,7 @@ function place(task: SchedulerTask, eligible: Day[], calendar: Calendar, caps: M
     result = pack(task, after, calendar, caps, Infinity);
     if (result.path) {
       // Find the smallest increase to the soft caps that permits completion.
-      let low = 1, high = Math.max(...after.map(d => d.daily_max_minutes - caps.get(d.date)!));
+      let low = 1, high = Math.max(...after.map(d => dailyQuota(d) - caps.get(d.date)!));
       while (low < high) {
         const mid = Math.floor((low + high) / 2);
         const attempt = pack(task, after, calendar, caps, mid);
@@ -229,7 +253,7 @@ function repair(entry: Entry, scheduled: Entry[], days: Day[], original: Block[]
     busy.get(b.date)?.push({ start: timeMinutes(b.start_time), end: timeMinutes(b.end_time) });
   }
   const slots = affectedDays.map(d => freeIntervals(d, busy.get(d.date)!.sort((a, b) => a.start - b.start)));
-  const dailyQuota = affectedDays.map(d => d.daily_max_minutes - busy.get(d.date)!.reduce((sum, b) => sum + b.end - b.start, 0));
+  const quotas = affectedDays.map(d => dailyQuota(d) - busy.get(d.date)!.reduce((sum, b) => sum + b.end - b.start, 0));
   const allowed = entries.map(e => new Set(e.eligible.map(d => d.date)));
   function search(previewDays: number) {
     const release = entries.map(e => shiftDate(e.task.target_week, -previewDays));
@@ -249,7 +273,7 @@ function repair(entry: Entry, scheduled: Entry[], days: Day[], original: Block[]
       return Math.min(quota, usable);
     };
     for (let i = affectedDays.length - 1; i >= 0; i--) {
-      const cap = capacity(i, 0, dailyQuota[i]);
+      const cap = capacity(i, 0, quotas[i]);
       future[i] = future[i + 1].map((n, j) => n + (eligible[i][j] ? cap : 0));
       futureTotal[i] = futureTotal[i + 1] + cap;
     }
@@ -260,7 +284,7 @@ function repair(entry: Entry, scheduled: Entry[], days: Day[], original: Block[]
       if (remaining.every(n => !n)) return true;
       if (budget.remaining === visitFloor || i === affectedDays.length) return false;
       const d = affectedDays[i];
-      const cap = capacity(i, earliest, dailyQuota[i] - used);
+      const cap = capacity(i, earliest, quotas[i] - used);
       if (remaining.reduce((sum, n) => sum + n, 0) > cap + futureTotal[i + 1]) return false;
       let neededToday = 0;
       for (let j = 0; j < remaining.length; j++) {
@@ -350,7 +374,7 @@ export function scheduleTasks(tasks: SchedulerTask[], courses: Course[], days: D
   const caps = new Map(days.map(d => {
     const week = weekStart(d.date);
     const average = Math.ceil((demand.get(week) ?? 0) / counts.get(week)!);
-    return [d.date, Math.min(d.daily_max_minutes, Math.max(minimumBlock(d), average))];
+    return [d.date, Math.min(dailyQuota(d), Math.max(minimumBlock(d), average))];
   }));
   active.sort((a, b) => a.task.deadline.localeCompare(b.task.deadline) || b.task.priority - a.task.priority);
   const calendar: Calendar = new Map();

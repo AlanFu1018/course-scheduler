@@ -2,7 +2,7 @@
 //   POST /api/tasks/{task_id}/completions             回報完成 → 更新速度與掌握度 → 需要時加排複習 → 判斷是否重排
 //   POST /api/plans/latest/missed                     檢查過了時間沒回報的時段 → 判斷是否重排
 //   PUT  /api/users/{user_id}/courses/{course_key}    使用者主觀調整熟悉度、難度、目標成績 → 判斷是否重排
-// 回應裡的 reschedule.needed = true 時，前端用 reschedule.scope 呼叫 POST /api/plans 重新排程
+// reschedule.needed = true 時，前端將 user_id、trigger、trigger_ref 送到 POST /api/plans/latest/adjust。
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
@@ -14,7 +14,7 @@ import { afterCompletion, afterMissed, afterUserAdjust, applyCompletion, localDa
 import type { Block, FeedbackTask, RescheduleDecision } from './feedback.ts';
 
 export type RouteHandler = (request: IncomingMessage, response: ServerResponse, path: string) => Promise<boolean>;
-type StoredPlan = { schedule: { plan_id: string; user_id: string; scope: { from: string; to: string } };
+type StoredPlan = { schedule: { plan_id: string; user_id: string; scope: { from: string; to: string; course_keys: string[] } };
   tasks: FeedbackTask[]; schedule_blocks: Block[]; [key: string]: unknown };
 
 function send(response: ServerResponse, status: number, data: unknown) {
@@ -83,7 +83,9 @@ export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | nul
   }
   const withScope = (decision: RescheduleDecision, plan: StoredPlan) => ({
     ...decision,
-    ...(decision.needed ? rescheduleScope(plan.tasks, plan.schedule_blocks, localDate(now().toISOString()), plan.schedule.scope.to) : {}),
+    ...(decision.needed && { endpoint: '/api/plans/latest/adjust',
+      ...rescheduleScope(plan.tasks, plan.schedule_blocks, localDate(now().toISOString()), plan.schedule.scope.to,
+        plan.schedule.scope.course_keys) }),
   });
 
   function complete(taskId: string, body: Record<string, unknown>) {
@@ -92,7 +94,7 @@ export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | nul
     const task = plan?.tasks.find(t => t.task_id === taskId);
     if (!plan || !task) return { status: 404, data: { error: '在最新的計畫裡找不到這個任務' } };
     const at = now();
-    const completion = parseCompletion(task, body, at);
+    const completion = parseCompletion(task, body, at, plan.schedule_blocks);
     const state = userCourse(userId, task.course_key);
     if (!state) return { status: 404, data: { error: '找不到這門課的學習狀況' } };
 
@@ -146,7 +148,8 @@ export function feedbackRoutes(plans: DatabaseSync, planning: DatabaseSync | nul
     saveUserCourse(after);
     const decision = afterUserAdjust(before, after, courseKey);
     const plan = latestPlan(userId);
-    return { status: 200, data: { user_course: after, reschedule: plan ? withScope(decision, plan) : decision } };
+    return { status: 200, data: { user_course: after, reschedule: plan ? withScope(decision, plan)
+      : { ...decision, ...(decision.needed && { endpoint: '/api/plans/latest/adjust' }) } } };
   }
 
   return async (request, response, path) => {

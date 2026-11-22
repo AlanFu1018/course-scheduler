@@ -25,14 +25,14 @@ function smallestPassing(low: number, high: number, passes: (value: number) => b
   return low;
 }
 
-function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Course>, required: number) {
+function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Course>, required: number, getDays: typeof availableDays) {
   const { from, to, tasks } = interval;
   const rules = availabilityRules(input);
   const base = rules.find(r => r.valid_from <= from && from <= r.valid_to) ?? emptyRule;
   const rule = { ...base, valid_from: from, valid_to: to };
   const proposed = { ...input, user: { ...input.user, availability: [...input.user.availability, rule] } };
   const scope = { from, to, course_keys: [] };
-  const days = availableDays(proposed, scope);
+  const days = getDays(proposed, scope);
   // A later-starting rule keeps its own cap inside the exceptional period.
   const adjustable = (date: string) => !rules.some(r => from < r.valid_from && r.valid_from <= date && date <= r.valid_to);
   const allowed = (task: Task, day: Day) => !dateRestriction(task, courses.get(task.course_key)!, day);
@@ -41,7 +41,7 @@ function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Co
     const fullWeek = Array.from({ length: 7 }, (_, i) => ({ weekday: i + 1, start_time: '00:00', end_time: '23:59' }));
     const expanded = { ...input.user, availability: [...input.user.availability, { ...rule, weekly_slots: fullWeek }] };
     const existing = new Set(days.map(d => d.date));
-    for (const day of availableDays({ ...input, user: expanded }, scope)) {
+    for (const day of getDays({ ...input, user: expanded }, scope)) {
       if (!existing.has(day.date) && adjustable(day.date)) days.push({ ...day, slots: [] });
     }
     days.sort((a, b) => a.date.localeCompare(b.date));
@@ -55,7 +55,7 @@ function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Co
     const capacity = days.map((day, i) => {
       if (!variable[i]) return dayCapacity(day);
       const usable = cap < minimumStudyMinutes ? dayCapacity({ ...day, daily_max_minutes: cap }) : widths[i];
-      return Math.min(cap, usable + extra);
+      return Math.min(Math.max(0, cap - (day.reserved_minutes ?? 0)), usable + extra);
     });
     return eligible.every((indices, i) => indices.reduce((n, j) => n + capacity[j], 0) >= windows[i].minutes)
       && !overloadedIntervals([], windows, days, capacity).length;
@@ -65,7 +65,7 @@ function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Co
   let extra = 0;
   while (cap < minimumStudyMinutes && !fits(cap, 0)) cap++;
   if (cap >= minimumStudyMinutes) {
-    const high = Math.max(cap, required);
+    const high = Math.max(cap, required + Math.max(0, ...days.map(d => d.reserved_minutes ?? 0)));
     if (!fits(high, 0)) {
       if (!fits(high, required)) return null;
       extra = smallestPassing(1, required, n => fits(high, n));
@@ -76,14 +76,14 @@ function addTime(input: PlanningInput, interval: Demand, courses: Map<string, Co
     extra_minutes_per_day: extra, availability_rule: { ...rule, daily_max_minutes: cap } };
 }
 
-function extendExamBuffer(input: PlanningInput, draft: PlanDraft, interval: Demand, courses: Map<string, Course>) {
+function extendExamBuffer(input: PlanningInput, draft: PlanDraft, interval: Demand, courses: Map<string, Course>, getDays: typeof availableDays) {
   if (!interval.tasks.some(t => t.phase === 'sprint')) return null;
   const rule = availabilityRules(input).find(r => r.valid_from <= interval.from && interval.from <= r.valid_to);
   if (!rule) return null;
   const affected = new Set(interval.tasks);
   for (let n = rule.exam_buffer_days + 1; n <= 21; n++) {
     const availability = input.user.availability.map(r => r === rule ? { ...r, exam_buffer_days: n } : r);
-    const days = availableDays({ ...input, user: { ...input.user, availability } }, draft.scope);
+    const days = getDays({ ...input, user: { ...input.user, availability } }, draft.scope);
     const capacity = days.map(dayCapacity);
     const windows = taskWindows(draft.tasks, courses, days, capacity);
     const current = windows.filter(w => affected.has(w.task));
@@ -123,7 +123,7 @@ function regularTime(input: PlanningInput, scope: PlanDraft['scope'], days: Day[
     availability_rule: { ...base, daily_max_minutes: Math.max(base.daily_max_minutes, raise_daily_max_to ?? 0) } };
 }
 
-export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses: Course[], days: Day[]) {
+export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses: Course[], days: Day[], getDays = availableDays) {
   const capacity = days.map(dayCapacity);
   const byKey = new Map(courses.map(course => [course.course_key, course]));
   const windows = taskWindows(draft.tasks, byKey, days, capacity);
@@ -163,7 +163,7 @@ export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses:
       const rule = rules.find(r => r.valid_from <= date && date <= r.valid_to) ?? emptyRule;
       if (!dateRestriction(task, course, { ...rule, date, slots: [] })) dates.push(date);
     }
-    const from = dates[0] ?? draft.scope.from, to = dates.at(-1) ?? draft.scope.to;
+    const from = dates[0] ?? draft.scope.from, to = dates.at(-1) ?? (scopeDays > 0 ? draft.scope.to : from);
     const outsideWindow = !dates.length;
     const existing = demands.find(d => d.from === from && d.to === to && d.outsideWindow === outsideWindow);
     if (existing) existing.tasks.push(task);
@@ -188,7 +188,7 @@ export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses:
   const longDemands = demands.filter(d => isLong(d.from, d.to));
   const intervals = longDemands.map(describe);
   let overall = null;
-  if (missing_minutes || intervals.length) {
+  if (scopeDays > 0 && (missing_minutes || intervals.length)) {
     const longTasks = windows.filter(w => w.first && isLong(w.first, w.last));
     const checks = [{ first: draft.scope.from, last: draft.scope.to, required: required_minutes, available: available_minutes },
       ...long, ...intervals.map(i => ({ first: i.from, last: i.to, required: i.required_minutes, available: i.available_minutes })),
@@ -206,8 +206,8 @@ export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses:
   const short_term = demands.filter(d => !isLong(d.from, d.to)).map(d => {
     const interval = describe(d);
     return { ...interval, suggestions: {
-      add_time: d.outsideWindow ? null : addTime(input, d, byKey, interval.required_minutes),
-      extend_exam_buffer: extendExamBuffer(input, draft, d, byKey), lower_target: interval.courses,
+      add_time: d.outsideWindow ? null : addTime(input, d, byKey, interval.required_minutes, getDays),
+      extend_exam_buffer: extendExamBuffer(input, draft, d, byKey, getDays), lower_target: interval.courses,
     } };
   });
   const hours = (minutes: number) => Number((minutes / 60).toFixed(1));
@@ -221,5 +221,6 @@ export function assessShortfall(input: PlanningInput, draft: PlanDraft, courses:
   }
   const first = short_term[0];
   if (first) message += `${overall ? '另外 ' : '平常時間夠用，但 '}${range(first)} 還差 ${first.missing_minutes} 分鐘。`;
+  if (scopeDays <= 0) message = `原計畫已於 ${shortDate(draft.scope.to)} 結束，剩下的 ${required_minutes} 分鐘沒有可排日期。`;
   return { overall, short_term, message };
 }
