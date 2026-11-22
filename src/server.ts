@@ -195,7 +195,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const checkpoints = new DatabaseSync('.planning-checkpoints.sqlite');
   // 動態調整要寫回學習狀況，需要可寫入的連線；沒有 PLANNING_DB_PATH 時只能回報、不能保存
   const writable = process.env.PLANNING_DB_PATH ? new DatabaseSync(process.env.PLANNING_DB_PATH) : null;
-  const server = createPlanningServer(source, checkpoints, feedbackRoutes(checkpoints, writable));
+  const server = createPlanningServer(source, checkpoints, feedbackRoutes(checkpoints, writable, { source }));
   const port = Number(process.env.PORT ?? 3000);
   server.listen(port, '127.0.0.1', () => {
     console.log(`http://127.0.0.1:${(server.address() as { port: number }).port}/`);
