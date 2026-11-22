@@ -273,9 +273,24 @@ function setupSidebar() {
   }).join("")}</nav><div class="sidebar-note">已完成的步驟可以返回修改，尚未完成的步驟會保持鎖定。</div></aside>`;
 }
 
+function dashboardSidebar() {
+  if (!state.setupComplete) return "";
+  const nickname = state.profile.nickname || "中央學生";
+  const department = state.profile.department || "尚未設定系所";
+  const items = [
+    ["today", "今日", "查看今天每個時段"],
+    ["calendar", "計畫", "整週逐時段安排"],
+    ["courses", "課程", "評量、任務與補充資料"],
+    ["progress", "回顧", "完成度與調整建議"],
+  ];
+  return `<aside class="dashboard-sidebar"><div class="sidebar-brand"><strong>NCU AI</strong><span>智慧讀書規劃器</span></div><div class="dashboard-profile"><span>${escapeHtml(nickname).slice(0, 1)}</span><div><strong>${escapeHtml(nickname)}</strong><small>${escapeHtml(department)}</small></div></div><div class="sidebar-label">主要功能</div><nav class="dashboard-nav" aria-label="桌面版主要導覽">${items.map(([route, label, description]) => `<button type="button" class="dashboard-nav-item ${state.route === route ? "active" : ""}" data-nav="${route}" ${state.route === route ? `aria-current="page"` : ""}><strong>${label}</strong><small>${description}</small></button>`).join("")}</nav><div class="sidebar-label dashboard-settings-label">設定</div><div class="dashboard-settings"><button type="button" data-action="settings-timetable">課表與行程</button><button type="button" data-action="settings-learning">學習偏好</button></div><div class="dashboard-sidebar-footer"><button type="button" class="restart-planner" data-action="open-reset-planner"><strong>從頭開始</strong><span>清除目前示範資料並重新設定</span></button></div></aside>`;
+}
+
 function shell(content, title = "", action = "") {
-  const sidebar = setupSidebar();
-  return `<div class="app-frame ${sidebar ? "setup-frame" : ""}">${sidebar}<div class="shell">${topbar(title, action)}${content}${nav()}</div></div>${state.toast ? `<div class="toast">${state.toast}</div>` : ""}`;
+  const setup = setupSidebar();
+  const dashboard = dashboardSidebar();
+  const frameClass = setup ? "setup-frame" : dashboard ? "dashboard-frame" : "";
+  return `<div class="app-frame ${frameClass}">${setup || dashboard}<div class="shell">${topbar(title, action)}${content}${nav()}</div></div>${state.toast ? `<div class="toast">${state.toast}</div>` : ""}`;
 }
 
 function setupProgress(step) {
@@ -809,6 +824,10 @@ function settingsModal() {
   return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校、系所與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>熟悉度、難度、目標與單次長度</small></span><span>修改</span></button></div></section></div>`;
 }
 
+function resetPlannerModal() {
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reset-planner-title"><section class="modal stack-lg reset-planner-modal"><div><div class="eyebrow danger-text">重新開始</div><h2 id="reset-planner-title" class="page-title">確定要從頭設定嗎？</h2><p class="muted">這會清除目前瀏覽器中的基本資料、課表、學習偏好、任務與完成紀錄，並回到第一頁。</p></div><div class="card warning small"><strong>不會影響 GitHub 或後端資料。</strong><br>目前原型只會清除這台裝置的示範資料。</div><div class="button-grid"><button type="button" class="btn secondary" data-action="close-modal">保留目前資料</button><button type="button" class="btn danger" data-action="confirm-reset-planner">清除並從頭開始</button></div></section></div>`;
+}
+
 function goToSetupTarget(button) {
   const stage = Number(button.dataset.stage);
   if (button.disabled || stage > state.highestSetupStage) return;
@@ -991,6 +1010,14 @@ function handleActionButton(actionButton) {
   const id = Number(actionButton.dataset.id);
   const actions = {
     "open-settings": () => openDynamicModal(settingsModal()),
+    "open-reset-planner": () => openDynamicModal(resetPlannerModal()),
+    "confirm-reset-planner": () => {
+      localStorage.removeItem(STORAGE_KEY);
+      state = structuredClone(defaultState);
+      document.querySelector(".modal-backdrop")?.remove();
+      render();
+      window.scrollTo(0, 0);
+    },
     "settings-profile": () => setState({ setupComplete: false, setupStep: 0 }),
     "settings-timetable": () => setState({ setupComplete: false, setupStep: 1 }),
     "settings-learning": () => setState({ setupComplete: false, setupStep: 4 }),
@@ -1383,7 +1410,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=34", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=35", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
