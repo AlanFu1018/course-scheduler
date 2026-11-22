@@ -13,6 +13,8 @@ import { checkpointRun, loadDraft } from './checkpoints.ts';
 import { planHistory } from './plan-history.ts';
 import { planningInputView } from './planning-input-view.ts';
 import type { Scope } from './availability.ts';
+import { feedbackRoutes } from './feedback-routes.ts';
+import type { RouteHandler } from './feedback-routes.ts';
 
 const viewer = (name: string) => new URL(`../viewer/${name}`, import.meta.url);
 const assets = new Map([
@@ -47,7 +49,7 @@ async function requestBody(request: IncomingMessage) {
   }
 }
 
-export function createPlanningServer(source: PlanningSource, checkpoints: DatabaseSync) {
+export function createPlanningServer(source: PlanningSource, checkpoints: DatabaseSync, extraRoutes?: RouteHandler) {
   const progress = new Map<string, string>();
   const history = planHistory(checkpoints);
 
@@ -173,6 +175,7 @@ export function createPlanningServer(source: PlanningSource, checkpoints: Databa
         json(response, 200, planningInputView(await source.load(userId)));
         return;
       }
+      if (extraRoutes && await extraRoutes(request, response, path)) return;
       json(response, 404, { error: '找不到頁面' });
     } catch (error) {
       if (error instanceof GeminiUnavailable) response.setHeader('Retry-After', error.retryAfter);
@@ -190,10 +193,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     userState: new URL('3_user_state.json', fixtureDir),
   });
   const checkpoints = new DatabaseSync('.planning-checkpoints.sqlite');
-  const server = createPlanningServer(source, checkpoints);
+  // 動態調整要寫回學習狀況，需要可寫入的連線；沒有 PLANNING_DB_PATH 時只能回報、不能保存
+  const writable = process.env.PLANNING_DB_PATH ? new DatabaseSync(process.env.PLANNING_DB_PATH) : null;
+  const server = createPlanningServer(source, checkpoints, feedbackRoutes(checkpoints, writable));
   const port = Number(process.env.PORT ?? 3000);
   server.listen(port, '127.0.0.1', () => {
     console.log(`http://127.0.0.1:${(server.address() as { port: number }).port}/`);
   });
-  server.on('close', () => { db?.close(); checkpoints.close(); });
+  server.on('close', () => { db?.close(); checkpoints.close(); writable?.close(); });
 }
