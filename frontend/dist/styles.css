@@ -450,6 +450,32 @@ textarea { min-height: 118px; resize: vertical; }
 }
 .settings-summary strong { color: #174f88; font-size: 15px; }
 .settings-summary span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.shared-study-settings {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #bcd8f6;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f4f9ff 0%, #fff 78%);
+  box-shadow: 0 8px 24px rgba(23, 79, 136, .07);
+}
+.shared-study-settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.shared-study-settings-head h2 { margin: 8px 0 4px; color: var(--text); font-size: 20px; }
+.shared-study-settings-head p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.shared-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #dcecff;
+  color: #145da7;
+  font-size: 12px;
+  font-weight: 750;
+}
+.shared-study-settings-grid { display: grid; gap: 13px; }
+.shared-study-settings-grid .field { min-width: 0; }
+.shared-study-settings-grid .field label { font-size: 14px; }
+.shared-study-settings-grid input { min-height: 46px; padding: 10px 11px; }
 .preference-card {
   display: grid;
   gap: 16px;
@@ -898,6 +924,8 @@ html[data-view-mode="desktop"] .picker-handle { display: none; }
 html[data-view-mode="desktop"] .course-results { max-height: 38dvh; }
 
 html[data-view-mode="desktop"] .study-settings-page { max-width: 1180px; }
+html[data-view-mode="desktop"] .shared-study-settings { padding: 22px; }
+html[data-view-mode="desktop"] .shared-study-settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 html[data-view-mode="desktop"] .preference-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 html[data-view-mode="desktop"] .preference-card { padding: 18px; }
 html[data-view-mode="desktop"] .course-supplement-card { padding: 22px; }

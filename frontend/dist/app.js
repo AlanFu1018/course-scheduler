@@ -142,6 +142,11 @@ const defaultState = {
   activeCell: "",
   pendingSectionId: "",
   coursePreferences: {},
+  globalStudySettings: {
+    sessionMinutes: "45",
+    dailyLimitMinutes: "120",
+    bufferDays: "7",
+  },
   courseSupplements: {},
   supplementCourseId: "",
   supplementUploadError: "",
@@ -210,7 +215,16 @@ function migrateLegacyTaskDates(tasks = []) {
 
 function loadState() {
   try {
-    const loaded = { ...structuredClone(defaultState), ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    const loaded = { ...structuredClone(defaultState), ...persisted };
+    if (!persisted.globalStudySettings) {
+      const previousPreference = Object.values(persisted.coursePreferences || {})[0] || {};
+      loaded.globalStudySettings = {
+        sessionMinutes: String(previousPreference.sessionMinutes || "45"),
+        dailyLimitMinutes: String(previousPreference.dailyLimitMinutes || "120"),
+        bufferDays: String(previousPreference.bufferDays || "7"),
+      };
+    }
     loaded.tasks = migrateLegacyTaskDates(loaded.tasks || []).map(normalizeTask);
     loaded.planRevisions ||= [];
     loaded.highestSetupStage = Math.max(loaded.highestSetupStage || 1, loaded.setupComplete ? 4 : logicalStageForSetupStep(loaded.setupStep));
@@ -263,7 +277,7 @@ function setupSidebar() {
   const steps = [
     [1, 0, "基本資料", "學校、系所與年級"],
     [2, 1, "建立課表", "課程與固定行程"],
-    [3, 4, "學習狀況", "各科讀書條件"],
+    [3, 4, "學習狀況", "共用與各科條件"],
     [4, 5, "設定完成", "確認規劃輸入"],
   ];
   return `<aside class="setup-sidebar"><div class="sidebar-brand"><strong>NCU AI</strong><span>智慧讀書規劃器</span></div><div class="sidebar-label">設定流程</div><nav class="setup-steps" aria-label="設定流程">${steps.map(([stage, target, label, description]) => {
@@ -389,10 +403,16 @@ function coursePreference(sectionId) {
     familiarity: "普通",
     difficulty: "普通",
     targetScore: "85",
+    ...(state.coursePreferences?.[sectionId] || {}),
+  };
+}
+
+function globalStudySettings() {
+  return {
     sessionMinutes: "45",
     dailyLimitMinutes: "120",
     bufferDays: "7",
-    ...(state.coursePreferences?.[sectionId] || {}),
+    ...(state.globalStudySettings || {}),
   };
 }
 
@@ -400,6 +420,19 @@ function preferenceDropdown(sectionId, field, id, options, selected) {
   const selectedOption = options.find(([value]) => String(value) === String(selected)) || options[0];
   return `<div class="custom-select" data-custom-select>
     <input type="hidden" data-preference="${field}" data-section-id="${sectionId}" value="${selectedOption[0]}" />
+    <button id="${id}" class="custom-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+      <span data-select-label>${selectedOption[1]}</span><span class="custom-select-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="custom-select-menu" role="listbox" aria-labelledby="${id}" hidden>
+      ${options.map(([value, label]) => `<button class="custom-select-option${String(selectedOption[0]) === String(value) ? " selected" : ""}" type="button" role="option" aria-selected="${String(selectedOption[0]) === String(value)}" data-select-value="${value}">${label}</button>`).join("")}
+    </div>
+  </div>`;
+}
+
+function globalPreferenceDropdown(field, id, options, selected) {
+  const selectedOption = options.find(([value]) => String(value) === String(selected)) || options[0];
+  return `<div class="custom-select" data-custom-select>
+    <input type="hidden" data-global-preference="${field}" value="${selectedOption[0]}" />
     <button id="${id}" class="custom-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
       <span data-select-label>${selectedOption[1]}</span><span class="custom-select-chevron" aria-hidden="true"></span>
     </button>
@@ -509,16 +542,25 @@ function coursePreferenceCard(section) {
       <div class="field"><label for="${section.id}-familiarity">熟悉度</label>${preferenceDropdown(section.id, "familiarity", `${section.id}-familiarity`, [["不熟悉","不熟悉"],["普通","普通"],["熟悉","熟悉"]], preference.familiarity)}</div>
       <div class="field"><label for="${section.id}-difficulty">課程難度</label>${preferenceDropdown(section.id, "difficulty", `${section.id}-difficulty`, [["簡單","簡單"],["普通","普通"],["困難","困難"],["非常困難","非常困難"]], preference.difficulty)}</div>
       <div class="field"><label for="${section.id}-target-score">目標成績</label><div class="input-unit"><input id="${section.id}-target-score" data-preference="targetScore" data-section-id="${section.id}" type="number" inputmode="numeric" min="60" max="100" value="${preference.targetScore}" /><span>分</span></div></div>
-      <div class="field"><label for="${section.id}-session">單次讀書長度</label>${preferenceDropdown(section.id, "sessionMinutes", `${section.id}-session`, [["25","25 分鐘"],["45","45 分鐘"],["60","60 分鐘"],["90","90 分鐘"]], preference.sessionMinutes)}</div>
-      <div class="field"><label for="${section.id}-daily-limit">單日安排上限</label>${preferenceDropdown(section.id, "dailyLimitMinutes", `${section.id}-daily-limit`, [["60","1 小時"],["90","1.5 小時"],["120","2 小時"],["180","3 小時"]], preference.dailyLimitMinutes)}</div>
-      <div class="field"><label for="${section.id}-buffer">考前預留天數</label><div class="input-unit"><input id="${section.id}-buffer" data-preference="bufferDays" data-section-id="${section.id}" type="number" inputmode="numeric" min="1" max="30" value="${preference.bufferDays}" /><span>天</span></div></div>
     </div>
   </article>`;
 }
 
+function sharedStudySettingsCard() {
+  const settings = globalStudySettings();
+  return `<section class="shared-study-settings" aria-labelledby="shared-study-settings-title">
+    <div class="shared-study-settings-head"><div><span class="shared-badge">套用全部科目</span><h2 id="shared-study-settings-title">共用讀書設定</h2><p>在這裡調整一次，所有課程與之後新增的課程都會使用相同設定。</p></div></div>
+    <div class="shared-study-settings-grid">
+      <div class="field"><label for="global-session">單次讀書長度</label>${globalPreferenceDropdown("sessionMinutes", "global-session", [["25","25 分鐘"],["45","45 分鐘"],["60","60 分鐘"],["90","90 分鐘"]], settings.sessionMinutes)}</div>
+      <div class="field"><label for="global-daily-limit">單日安排上限</label>${globalPreferenceDropdown("dailyLimitMinutes", "global-daily-limit", [["60","1 小時"],["90","1.5 小時"],["120","2 小時"],["180","3 小時"]], settings.dailyLimitMinutes)}</div>
+      <div class="field"><label for="global-buffer">考前預留天數</label><div class="input-unit"><input id="global-buffer" data-global-preference="bufferDays" type="number" inputmode="numeric" min="1" max="30" value="${settings.bufferDays}" /><span>天</span></div></div>
+    </div>
+  </section>`;
+}
+
 function availabilitySetup() {
   const sections = selectedSections();
-  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整每門課的讀書條件</h1><p class="muted">這些設定會成為 AI 安排讀書任務的依據，之後都可以再修改。</p></div><div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>自訂行程只用來占用時間，不會產生讀書任務。</span></div><form id="study-settings-form" class="stack-lg"><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div>${courseSupplementSection(sections)}<div class="settings-form-actions"><button class="btn primary" type="button" data-action="save-study-settings">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
+  return shell(`<section class="content stack-lg study-settings-page">${setupProgress(3)}<div><div class="eyebrow">步驟 3／4・學習狀況設定</div><h1 class="page-title">調整讀書條件</h1><p class="muted">先設定所有科目共用的讀書方式，再調整每門課的個別條件。</p></div><form id="study-settings-form" class="stack-lg">${sharedStudySettingsCard()}<div class="settings-summary"><strong>${sections.length} 門課需要設定</strong><span>各科只需調整熟悉度、課程難度與目標成績；自訂行程不會產生讀書任務。</span></div><div class="preference-cards">${sections.map(coursePreferenceCard).join("")}</div>${courseSupplementSection(sections)}<div class="settings-form-actions"><button class="btn primary" type="button" data-action="save-study-settings">儲存設定，繼續</button><button class="btn secondary" type="button" data-action="back-import">返回課表</button></div></form></section>`, "學習狀況設定");
 }
 
 function analysisInput() {
@@ -531,7 +573,11 @@ function analysisInput() {
       teacher: section.teacher,
       meetings: section.meetings,
     })),
-    preferences: state.coursePreferences || {},
+    globalSettings: globalStudySettings(),
+    preferences: Object.fromEntries(selectedSections().map(section => [section.id, {
+      ...coursePreference(section.id),
+      ...globalStudySettings(),
+    }])),
     timetable: state.timetable,
     assessment: state.assessment,
   };
@@ -552,6 +598,7 @@ async function runMockAnalysis() {
 
 async function saveStudySettings(form = document.querySelector("#study-settings-form")) {
   form?.querySelectorAll("[data-preference]").forEach(updateCoursePreference);
+  form?.querySelectorAll("[data-global-preference]").forEach(updateGlobalStudySetting);
   try {
     await runMockAnalysis();
     state.setupStep = 5;
@@ -766,7 +813,7 @@ function coursesPage() {
     const assessment = courseAssessment(active, sections.indexOf(active));
     const tasks = state.tasks.filter(task => task.courseId === active.id);
     const supplement = state.courseSupplements?.[active.id];
-    return shell(`<section class="content stack-lg course-detail-page"><button class="back-link" data-action="close-course-detail">返回所有課程</button><div class="course-detail-hero"><div><span class="course-category ${active.category}">${active.category === "required" ? "必修" : "通識"}</span><h1 class="page-title">${active.name}</h1><p>${active.code}・${active.teacher}・${formatSectionTimes(active)}</p></div><span class="status confirmed">已分析</span></div><div class="course-detail-grid"><section class="card stack"><h2 class="section-title">最近評量</h2><div class="assessment-highlight"><strong>${assessment.title}</strong><span>${assessment.week}・占比 ${assessment.weight}</span></div><div class="source-note">來源：Mock 課綱分析，可由後端結果替換。</div></section><section class="card stack"><h2 class="section-title">個人學習條件</h2><div class="detail-pairs"><span>熟悉度<strong>${preference.familiarity}</strong></span><span>難度<strong>${preference.difficulty}</strong></span><span>目標<strong>${preference.targetScore} 分</strong></span><span>單次長度<strong>${preference.sessionMinutes} 分鐘</strong></span></div><button class="btn secondary" data-action="edit-learning-settings">修改條件</button></section><section class="card stack course-task-section"><div class="row-between"><h2 class="section-title">AI 產生的任務</h2><span>${tasks.length} 個</span></div>${tasks.length ? tasks.map(task => taskCard(task)).join("") : `<div class="empty-results">目前沒有這門課的任務</div>`}</section><section class="card stack"><h2 class="section-title">補充資料</h2><p class="muted">${supplement?.note || "尚未提供額外文字或圖片。"}</p><button class="btn secondary" data-action="edit-learning-settings">前往補充資料</button></section></div></section>`, "課程詳情");
+    return shell(`<section class="content stack-lg course-detail-page"><button class="back-link" data-action="close-course-detail">返回所有課程</button><div class="course-detail-hero"><div><span class="course-category ${active.category}">${active.category === "required" ? "必修" : "通識"}</span><h1 class="page-title">${active.name}</h1><p>${active.code}・${active.teacher}・${formatSectionTimes(active)}</p></div><span class="status confirmed">已分析</span></div><div class="course-detail-grid"><section class="card stack"><h2 class="section-title">最近評量</h2><div class="assessment-highlight"><strong>${assessment.title}</strong><span>${assessment.week}・占比 ${assessment.weight}</span></div><div class="source-note">來源：Mock 課綱分析，可由後端結果替換。</div></section><section class="card stack"><h2 class="section-title">個人學習條件</h2><div class="detail-pairs"><span>熟悉度<strong>${preference.familiarity}</strong></span><span>難度<strong>${preference.difficulty}</strong></span><span>目標<strong>${preference.targetScore} 分</strong></span><span>單次長度<strong>${globalStudySettings().sessionMinutes} 分鐘（共用）</strong></span></div><button class="btn secondary" data-action="edit-learning-settings">修改條件</button></section><section class="card stack course-task-section"><div class="row-between"><h2 class="section-title">AI 產生的任務</h2><span>${tasks.length} 個</span></div>${tasks.length ? tasks.map(task => taskCard(task)).join("") : `<div class="empty-results">目前沒有這門課的任務</div>`}</section><section class="card stack"><h2 class="section-title">補充資料</h2><p class="muted">${supplement?.note || "尚未提供額外文字或圖片。"}</p><button class="btn secondary" data-action="edit-learning-settings">前往補充資料</button></section></div></section>`, "課程詳情");
   }
   const cards = sections.map((section, index) => {
     const assessment = courseAssessment(section, index);
@@ -821,7 +868,7 @@ function taskDetailModal(id) {
 }
 
 function settingsModal() {
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校、系所與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>熟悉度、難度、目標與單次長度</small></span><span>修改</span></button></div></section></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校、系所與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>共用讀書設定與各科熟悉度、難度、目標</small></span><span>修改</span></button></div></section></div>`;
 }
 
 function resetPlannerModal() {
@@ -969,6 +1016,14 @@ function updateCoursePreference(target) {
   if (!sectionId || !field) return false;
   state.coursePreferences ||= {};
   state.coursePreferences[sectionId] = { ...coursePreference(sectionId), [field]: target.value };
+  save();
+  return true;
+}
+
+function updateGlobalStudySetting(target) {
+  const field = target.dataset.globalPreference;
+  if (!field) return false;
+  state.globalStudySettings = { ...globalStudySettings(), [field]: target.value };
   save();
   return true;
 }
@@ -1226,6 +1281,7 @@ document.addEventListener("change", async (event) => {
     }
     return;
   }
+  if (updateGlobalStudySetting(event.target)) return;
   if (updateCoursePreference(event.target)) return;
   if (event.target.id === "school") {
     const form = event.target.form;
@@ -1253,6 +1309,7 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (updateGlobalStudySetting(event.target)) return;
   if (updateCoursePreference(event.target)) return;
   if (event.target.matches("[data-supplement-note]")) {
     const { sectionId, supplement } = currentSupplement();
@@ -1304,7 +1361,7 @@ document.addEventListener("click", (event) => {
   const customOption = event.target.closest("[data-select-value]");
   if (customOption) {
     const customSelect = customOption.closest("[data-custom-select]");
-    const input = customSelect?.querySelector("input[data-preference]");
+    const input = customSelect?.querySelector("input[data-preference], input[data-global-preference]");
     if (!customSelect || !input) return;
     input.value = customOption.dataset.selectValue;
     customSelect.querySelector("[data-select-label]").textContent = customOption.textContent.trim();
@@ -1317,7 +1374,7 @@ document.addEventListener("click", (event) => {
     const trigger = customSelect.querySelector(".custom-select-trigger");
     menu.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
-    updateCoursePreference(input);
+    updateGlobalStudySetting(input) || updateCoursePreference(input);
     trigger.focus();
     return;
   }
@@ -1410,7 +1467,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=35", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=36", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
