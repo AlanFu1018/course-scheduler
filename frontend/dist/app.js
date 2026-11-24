@@ -275,7 +275,7 @@ function setupSidebar() {
   if (state.setupComplete) return "";
   const current = logicalStageForSetupStep(state.setupStep);
   const steps = [
-    [1, 0, "基本資料", "學校、系所與年級"],
+    [1, 0, "基本資料", "學校與年級"],
     [2, 1, "建立課表", "課程與固定行程"],
     [3, 4, "學習狀況", "共用與各科條件"],
     [4, 5, "設定完成", "確認規劃輸入"],
@@ -290,14 +290,14 @@ function setupSidebar() {
 function dashboardSidebar() {
   if (!state.setupComplete) return "";
   const nickname = state.profile.nickname || "中央學生";
-  const department = state.profile.department || "尚未設定系所";
+  const schoolAndGrade = `${state.profile.school === "ncu" ? "國立中央大學" : "其他學校"}${state.profile.grade ? `・${state.profile.grade}` : ""}`;
   const items = [
     ["today", "今日", "查看今天每個時段"],
     ["calendar", "計畫", "整週逐時段安排"],
     ["courses", "課程", "評量、任務與補充資料"],
     ["progress", "回顧", "完成度與調整建議"],
   ];
-  return `<aside class="dashboard-sidebar"><div class="sidebar-brand"><strong>NCU AI</strong><span>智慧讀書規劃器</span></div><div class="dashboard-profile"><span>${escapeHtml(nickname).slice(0, 1)}</span><div><strong>${escapeHtml(nickname)}</strong><small>${escapeHtml(department)}</small></div></div><div class="sidebar-label">主要功能</div><nav class="dashboard-nav" aria-label="桌面版主要導覽">${items.map(([route, label, description]) => `<button type="button" class="dashboard-nav-item ${state.route === route ? "active" : ""}" data-nav="${route}" ${state.route === route ? `aria-current="page"` : ""}><strong>${label}</strong><small>${description}</small></button>`).join("")}</nav><div class="sidebar-label dashboard-settings-label">設定</div><div class="dashboard-settings"><button type="button" data-action="settings-timetable">課表與行程</button><button type="button" data-action="settings-learning">學習偏好</button></div><div class="dashboard-sidebar-footer"><button type="button" class="restart-planner" data-action="open-reset-planner"><strong>從頭開始</strong><span>清除目前示範資料並重新設定</span></button></div></aside>`;
+  return `<aside class="dashboard-sidebar"><div class="sidebar-brand"><strong>NCU AI</strong><span>智慧讀書規劃器</span></div><div class="dashboard-profile"><span>${escapeHtml(nickname).slice(0, 1)}</span><div><strong>${escapeHtml(nickname)}</strong><small>${escapeHtml(schoolAndGrade)}</small></div></div><div class="sidebar-label">主要功能</div><nav class="dashboard-nav" aria-label="桌面版主要導覽">${items.map(([route, label, description]) => `<button type="button" class="dashboard-nav-item ${state.route === route ? "active" : ""}" data-nav="${route}" ${state.route === route ? `aria-current="page"` : ""}><strong>${label}</strong><small>${description}</small></button>`).join("")}</nav><div class="sidebar-label dashboard-settings-label">設定</div><div class="dashboard-settings"><button type="button" data-action="settings-timetable">課表與行程</button><button type="button" data-action="settings-learning">學習偏好</button></div><div class="dashboard-sidebar-footer"><button type="button" class="restart-planner" data-action="open-reset-planner"><strong>從頭開始</strong><span>清除目前示範資料並重新設定</span></button></div></aside>`;
 }
 
 function shell(content, title = "", action = "") {
@@ -324,7 +324,6 @@ function onboarding() {
       <div class="field"><label for="nickname">怎麼稱呼你</label><input id="nickname" name="nickname" required autocomplete="nickname" placeholder="例如：小宇" value="${state.profile.nickname}" /></div>
       <div class="field"><label for="school">就讀學校</label><select id="school" name="school" required><option value="">請選擇學校</option><option value="ncu" ${isNcu ? "selected" : ""}>國立中央大學</option><option value="other" ${state.profile.school === "other" ? "selected" : ""}>其他學校</option></select></div>
       <div id="school-support" class="school-support ${isNcu ? "supported" : ""}">${isNcu ? `<strong>中央大學資料可用</strong><span>下一頁可搜尋課號、課名或授課老師。</span>` : `<strong>選擇中央大學即可串接</strong><span>原型會先使用模擬課程資料，之後替換為後端 API。</span>`}</div>
-      <div class="field"><label for="department">系所</label><input id="department" name="department" required placeholder="例如：資訊工程學系" value="${state.profile.department}" /></div>
       <div class="field"><label for="grade">年級</label><select id="grade" name="grade" required><option value="">請選擇年級</option>${["大一","大二","大三","大四","碩士班","博士班"].map(item => `<option ${state.profile.grade === item ? "selected" : ""}>${item}</option>`).join("")}</select></div>
       <div class="privacy-note">只收集建立課表與讀書計畫需要的資訊；目前頁面使用示意資料。</div>
       <button class="btn primary block" type="button" data-action="profile-next">下一步，填寫課表</button>
@@ -868,7 +867,7 @@ function taskDetailModal(id) {
 }
 
 function settingsModal() {
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校、系所與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>共用讀書設定與各科熟悉度、難度、目標</small></span><span>修改</span></button></div></section></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>共用讀書設定與各科熟悉度、難度、目標</small></span><span>修改</span></button></div></section></div>`;
 }
 
 function resetPlannerModal() {
@@ -1467,7 +1466,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=36", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=37", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
