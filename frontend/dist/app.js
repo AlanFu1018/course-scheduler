@@ -840,10 +840,10 @@ function todayPage() {
   const todayKey = currentDayKey();
   const todayTasks = state.tasks.filter(task => task.day === todayKey);
   const complete = todayTasks.filter(task => task.done || task.status === "done").length;
+  const completionRate = todayTasks.length ? Math.round(todayTasks.reduce((sum, task) => sum + taskProgressPercent(task), 0) / todayTasks.length) : 100;
   const pending = todayTasks.filter(task => !task.done && task.status !== "done");
   const nextTask = pending[0];
   const totalMinutes = todayTasks.reduce((sum, task) => sum + task.duration, 0);
-  const upcoming = pending[1] || state.tasks.find(task => task.day !== todayKey && !task.done && task.status !== "done");
   const agenda = dailyAgenda(todayKey);
   const heroAction = nextTask?.status === "in_progress"
     ? `<button class="btn primary" data-action="complete-task" data-id="${nextTask.id}">完成任務</button>`
@@ -855,7 +855,7 @@ function todayPage() {
         ${nextTask ? `<section class="next-task-card"><div class="row-between"><span class="task-priority">${nextTask.status === "in_progress" ? "進行中" : "下一個任務"}</span><span class="small muted">${nextTask.dueDate}</span></div><div><div class="task-time">${nextTask.time}</div><div class="task-course">${nextTask.course}・${nextTask.duration} 分鐘</div><h2>${nextTask.title}</h2><p>${nextTask.rationale}</p></div><div class="next-task-actions"><button class="btn secondary" data-action="task-not-done" data-id="${nextTask.id}">今天做不完</button>${heroAction}<button class="btn ghost" data-action="open-task-detail" data-id="${nextTask.id}">查看詳情</button></div></section>` : `<section class="card success stack"><strong>做得很好，今天可以休息了。</strong><span class="muted">回顧頁會整理實際投入時間與下週建議。</span></section>`}
         <section class="stack"><div class="row-between"><div><h2 class="section-title">今日完整安排</h2><span class="small muted">08:00–24:00，每個時段都有明確用途</span></div><span class="small muted">${complete}／${todayTasks.length} 個讀書任務完成</span></div><div class="daily-agenda">${agenda.map(item => agendaRow(item, nextTask)).join("")}</div></section>
       </div>
-      <aside class="today-side stack"><section class="card soft stack"><div class="row-between"><strong>今日完成度</strong><span>${complete}／${todayTasks.length}</span></div><div class="progress"><span style="width:${todayTasks.length ? Math.round(complete / todayTasks.length * 100) : 100}%"></span></div><div class="row-between small muted"><span>預計投入</span><span>${Math.floor(totalMinutes / 60)} 小時 ${totalMinutes % 60} 分</span></div></section><section class="card stack"><div class="eyebrow">接下來</div><strong>${upcoming ? `${upcoming.day === todayKey ? upcoming.time : upcoming.dateLabel}・${upcoming.course}` : "本週沒有其他任務"}</strong><span class="small muted">${upcoming ? upcoming.title : "可以保留彈性時間"}</span><button class="btn secondary block" data-nav="calendar">查看完整計畫</button></section></aside>
+      <aside class="today-side stack"><section class="card soft stack"><div class="row-between"><strong>今日完成度</strong><strong>${completionRate}%</strong></div><div class="progress"><span style="width:${completionRate}%"></span></div><div class="row-between small muted"><span>${complete}／${todayTasks.length} 項完全完成</span><span>預計 ${Math.floor(totalMinutes / 60)} 小時 ${totalMinutes % 60} 分</span></div></section>${todaySidebarStudyProgress(todayTasks)}</aside>
     </div>
   </section>`, fullDateLabel(), `<span class="engine-badge">Mock Analysis</span>`);
 }
@@ -921,6 +921,15 @@ function todayStudyProgressSection(tasks) {
   return `<section class="card today-study-progress stack"><div class="row-between"><div><h2 class="section-title">今日 AI 讀書計畫</h2><p class="muted">只顯示 AI 安排的讀書任務，點選每項任務目前的完成度。</p></div><strong class="today-study-average">今日完成度 ${average}%</strong></div>${items ? `<div class="today-study-list">${items}</div>` : `<div class="empty-results">今天沒有 AI 安排的讀書任務。</div>`}</section>`;
 }
 
+function todaySidebarStudyProgress(tasks) {
+  const items = tasks.map(task => {
+    const progress = taskProgressPercent(task);
+    const options = [0, 25, 50, 75, 100].map(value => `<button type="button" class="${progress === value ? "active" : ""}" data-action="set-task-progress" data-id="${task.id}" data-progress="${value}" aria-pressed="${progress === value}">${value}%</button>`).join("");
+    return `<article class="sidebar-study-item"><div class="sidebar-study-heading"><div><span>${escapeHtml(task.time)}・${escapeHtml(task.course)}</span><strong>${escapeHtml(task.title)}</strong></div><strong class="today-study-percent">${progress}%</strong></div><div class="progress-options compact" role="group" aria-label="${escapeHtml(task.course)} ${escapeHtml(task.title)}完成度">${options}</div></article>`;
+  }).join("");
+  return `<section class="card today-sidebar-progress stack"><div><div class="eyebrow">今日讀書進度</div><p class="small muted">選擇每項 AI 讀書計畫目前的完成度。</p></div>${items ? `<div class="today-sidebar-study-list">${items}</div>` : `<div class="empty-results">今天沒有 AI 安排的讀書任務。</div>`}<button class="btn secondary block" data-nav="calendar">查看完整計畫</button></section>`;
+}
+
 function progressPage() {
   const todayTasks = state.tasks.filter(task => task.day === currentDayKey());
   const visibleTasks = state.reviewRange === "day" ? todayTasks : state.tasks;
@@ -935,7 +944,7 @@ function progressPage() {
     return `<div class="review-course-row"><div><strong>${section.name}</strong><span>${done}／${tasks.length} 任務完成</span></div><div class="mini-progress"><span style="width:${rate}%"></span></div><strong>${rate}%</strong></div>`;
   }).join("");
   const rangeLabel = state.reviewRange === "day" ? "今日完成度" : "本週完成度";
-  return shell(`<section class="content stack-lg review-page"><div class="row-between"><div><div class="eyebrow">學習進度</div><h1 class="page-title">看見實際投入與調整原因</h1></div><div class="range-switch"><button class="${state.reviewRange === "day" ? "active" : ""}" data-review-range="day">今日</button><button class="${state.reviewRange === "week" ? "active" : ""}" data-review-range="week">本週</button></div></div><div class="review-metrics"><div class="metric-card"><span>${rangeLabel}</span><strong>${completionRate}%</strong></div><div class="metric-card"><span>實際投入</span><strong>${actual} 分鐘</strong></div><div class="metric-card"><span>與預估差異</span><strong>${actual - estimated >= 0 ? "+" : ""}${actual - estimated} 分鐘</strong></div><div class="metric-card"><span>重新排程</span><strong>${state.replanCount} 次</strong></div></div>${state.reviewRange === "day" ? todayStudyProgressSection(todayTasks) : ""}<div class="review-layout"><section class="card stack"><h2 class="section-title">各科進度</h2><div class="review-course-list">${courseRows}</div></section><aside class="card review-suggestion stack"><span class="status ai">Mock AI 建議</span><h2>下週縮短單次任務長度</h2><p>若實際時間持續高於預估，建議將高難度課程拆成 25–45 分鐘的小任務。</p><button class="btn primary" data-action="apply-review-suggestion">預覽下週調整</button></aside></div></section>`, "進度");
+  return shell(`<section class="content stack-lg review-page"><div class="row-between"><div><div class="eyebrow">學習進度</div><h1 class="page-title">看見實際投入與調整原因</h1></div><div class="range-switch"><button class="${state.reviewRange === "day" ? "active" : ""}" data-review-range="day">今日</button><button class="${state.reviewRange === "week" ? "active" : ""}" data-review-range="week">本週</button></div></div><div class="review-metrics"><div class="metric-card"><span>${rangeLabel}</span><strong>${completionRate}%</strong></div><div class="metric-card"><span>實際投入</span><strong>${actual} 分鐘</strong></div><div class="metric-card"><span>與預估差異</span><strong>${actual - estimated >= 0 ? "+" : ""}${actual - estimated} 分鐘</strong></div><div class="metric-card"><span>重新排程</span><strong>${state.replanCount} 次</strong></div></div><div class="review-layout"><section class="card stack"><h2 class="section-title">各科進度</h2><div class="review-course-list">${courseRows}</div></section><aside class="card review-suggestion stack"><span class="status ai">Mock AI 建議</span><h2>下週縮短單次任務長度</h2><p>若實際時間持續高於預估，建議將高難度課程拆成 25–45 分鐘的小任務。</p><button class="btn primary" data-action="apply-review-suggestion">預覽下週調整</button></aside></div></section>`, "進度");
 }
 
 function taskModal(id) {
@@ -1597,7 +1606,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=40", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=41", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });

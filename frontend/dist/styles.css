@@ -983,6 +983,16 @@ html[data-view-mode="desktop"] .toast { bottom: 28px; }
 .next-task-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 10px; }
 .next-task-actions .btn:last-child { grid-column: 1 / -1; }
 .today-side { align-content: start; }
+.today-sidebar-progress { gap: 14px; }
+.today-sidebar-progress p { margin: 5px 0 0; line-height: 1.45; }
+.today-sidebar-study-list { display: grid; gap: 12px; }
+.sidebar-study-item { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 13px; background: #fff; }
+.sidebar-study-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+.sidebar-study-heading > div { min-width: 0; display: grid; gap: 4px; }
+.sidebar-study-heading > div > span { color: var(--primary); font-size: 12px; font-weight: 750; }
+.sidebar-study-heading > div > strong { font-size: 14px; line-height: 1.4; }
+.progress-options.compact { gap: 4px; }
+.progress-options.compact button { min-height: 34px; padding-inline: 3px; font-size: 11px; }
 .task.compact { padding: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; }
 .task.compact.highlighted { border-color: #bdd8f7; }
 .task-main { min-width: 0; flex: 1; min-height: 70px; display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
