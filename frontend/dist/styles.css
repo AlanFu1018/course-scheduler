@@ -943,6 +943,25 @@ html[data-view-mode="desktop"] .toast { bottom: 28px; }
 
 /* Daily planning experience */
 .engine-badge { padding: 6px 9px; border-radius: 999px; background: #f0ecff; color: #5946b6; font-size: 11px; font-weight: 750; }
+.plan-range-card {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid #bcd8f6;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f4f9ff 0%, #fff 78%);
+  box-shadow: 0 8px 24px rgba(23, 79, 136, .07);
+}
+.plan-range-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.plan-range-heading h2 { margin: 8px 0 4px; font-size: 20px; }
+.plan-range-heading p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.plan-range-summary { flex: 0 0 auto; max-width: 320px; padding: 10px 12px; border-radius: 12px; font-size: 14px; font-weight: 750; line-height: 1.45; }
+.plan-range-summary.valid { background: #eaf8f2; color: #17664e; }
+.plan-range-summary.invalid { background: #fff0f0; color: #a13c3c; }
+.plan-range-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.plan-range-fields .field { min-width: 0; }
+.plan-range-fields input[type="date"] { min-height: 50px; color: var(--text); background: #fff; }
+.plan-range-note { padding-top: 13px; border-top: 1px solid #dbe8f5; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .plan-preview-layout, .today-layout, .review-layout { display: grid; gap: 18px; }
 .plan-summary-grid, .review-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .metric-card { min-width: 0; display: grid; gap: 5px; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
@@ -1070,7 +1089,7 @@ html[data-view-mode="desktop"] .app-frame:not(.setup-frame) .content { padding: 
 html[data-view-mode="desktop"] .nav { width: min(100%, 1200px); }
 html[data-view-mode="desktop"] .plan-preview-page { max-width: 1050px !important; }
 html[data-view-mode="desktop"] .plan-preview-layout { grid-template-columns: minmax(0, 1.45fr) minmax(280px, .75fr); align-items: start; }
-html[data-view-mode="desktop"] .plan-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html[data-view-mode="desktop"] .plan-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 html[data-view-mode="desktop"] .today-layout { grid-template-columns: minmax(0, 1.5fr) minmax(270px, .65fr); align-items: start; }
 html[data-view-mode="desktop"] .today-side { position: sticky; top: 96px; }
 html[data-view-mode="desktop"] .course-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1087,6 +1106,9 @@ html[data-view-mode="mobile"] .task-main { grid-template-columns: 70px minmax(0,
 html[data-view-mode="mobile"] .task-labels { grid-column: 2; align-items: flex-start; flex-direction: row; }
 html[data-view-mode="mobile"] .ai-plan-summary { display: grid; }
 html[data-view-mode="mobile"] .ai-plan-summary .btn { width: 100%; }
+html[data-view-mode="mobile"] .plan-range-heading { display: grid; }
+html[data-view-mode="mobile"] .plan-range-summary { max-width: none; }
+html[data-view-mode="mobile"] .plan-range-fields { grid-template-columns: 1fr; }
 html[data-view-mode="mobile"] .plan-diff { grid-template-columns: 1fr; }
 html[data-view-mode="mobile"] .diff-line { width: 2px; height: 24px; justify-self: center; }
 html[data-view-mode="mobile"] .agenda-row { grid-template-columns: 82px 52px minmax(0, 1fr); gap: 8px; }
@@ -1100,6 +1122,9 @@ html[data-view-mode="mobile"] .agenda-status { grid-column: 3; }
   .task-labels { grid-column: 2; align-items: flex-start; flex-direction: row; }
   .ai-plan-summary { display: grid; }
   .ai-plan-summary .btn { width: 100%; }
+  .plan-range-heading { display: grid; }
+  .plan-range-summary { max-width: none; }
+  .plan-range-fields { grid-template-columns: 1fr; }
   .course-overview-meta, .detail-pairs { grid-template-columns: 1fr 1fr; }
   .review-course-row { grid-template-columns: minmax(110px, 1fr) 70px 38px; gap: 8px; }
   .plan-diff { grid-template-columns: 1fr; }

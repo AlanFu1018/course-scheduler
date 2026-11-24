@@ -82,6 +82,33 @@ function dateForOffset(offset = 0) {
   return date;
 }
 
+function dateInputValue(date = dateForOffset()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function planRangeDetails(range = state?.planRange) {
+  const start = parseDateInput(range?.startDate);
+  const end = parseDateInput(range?.endDate);
+  if (!start || !end) return { valid: false, days: 0, label: "請選擇完整的開始與結束日期" };
+  const days = Math.floor((end - start) / 86400000) + 1;
+  if (days < 1) return { valid: false, days: 0, label: "結束日期不能早於開始日期" };
+  return {
+    valid: true,
+    days,
+    label: `${start.getFullYear()}/${start.getMonth() + 1}/${start.getDate()}－${end.getFullYear()}/${end.getMonth() + 1}/${end.getDate()}，共 ${days} 天`,
+  };
+}
+
 function dayKeyForDate(date) {
   return DAY_SEQUENCE[date.getDay()];
 }
@@ -146,6 +173,10 @@ const defaultState = {
     sessionMinutes: "45",
     dailyLimitMinutes: "120",
     bufferDays: "7",
+  },
+  planRange: {
+    startDate: dateInputValue(dateForOffset()),
+    endDate: dateInputValue(dateForOffset(13)),
   },
   courseSupplements: {},
   supplementCourseId: "",
@@ -293,7 +324,7 @@ function dashboardSidebar() {
   const schoolAndGrade = `${state.profile.school === "ncu" ? "國立中央大學" : "其他學校"}${state.profile.grade ? `・${state.profile.grade}` : ""}`;
   const items = [
     ["today", "今日", "查看今天每個時段"],
-    ["calendar", "計畫", "整週逐時段安排"],
+    ["calendar", "計畫", "查看規劃期間安排"],
     ["courses", "課程", "評量、任務與補充資料"],
     ["progress", "回顧", "完成度與調整建議"],
   ];
@@ -579,6 +610,7 @@ function analysisInput() {
     }])),
     timetable: state.timetable,
     assessment: state.assessment,
+    planRange: { ...state.planRange },
   };
 }
 
@@ -609,6 +641,44 @@ async function saveStudySettings(form = document.querySelector("#study-settings-
     state.analysisStatus = "error";
     save();
     showToast("暫時無法產生分析，請稍後再試。");
+  }
+}
+
+function updatePlanRange(target) {
+  const field = target.dataset.planRange;
+  if (!field) return false;
+  state.planRange = { ...state.planRange, [field]: target.value };
+  save();
+  const details = planRangeDetails();
+  const summary = document.querySelector("[data-plan-range-summary]");
+  if (summary) {
+    summary.textContent = details.label;
+    summary.classList.toggle("valid", details.valid);
+    summary.classList.toggle("invalid", !details.valid);
+  }
+  const days = document.querySelector("[data-plan-range-days]");
+  if (days) days.textContent = details.valid ? `${details.days} 天` : "待設定";
+  return true;
+}
+
+async function finishSetup() {
+  const details = planRangeDetails();
+  if (!details.valid) {
+    const target = !state.planRange?.startDate ? "#plan-start-date" : "#plan-end-date";
+    document.querySelector(target)?.focus();
+    return showToast(details.label);
+  }
+  try {
+    await runMockAnalysis();
+    state.setupComplete = true;
+    state.route = "today";
+    save();
+    render();
+    window.scrollTo(0, 0);
+  } catch {
+    state.analysisStatus = "error";
+    save();
+    showToast("暫時無法依日期產生計畫，請稍後再試。");
   }
 }
 
@@ -700,20 +770,29 @@ function continueFromTimetable() {
 function planReady() {
   const count = selectedSections().length;
   const analysis = state.analysis || {};
+  const range = planRangeDetails();
   const summary = analysis.summary || { totalTasks: state.tasks.length, totalMinutes: state.tasks.reduce((sum, task) => sum + task.duration, 0), todayTasks: state.tasks.filter(task => task.day === "thu").length };
   const insightRows = (analysis.courseInsights || selectedSections().slice(0, 5).map(section => ({ name: section.name, taskCount: state.tasks.filter(task => task.courseId === section.id).length, minutes: state.tasks.filter(task => task.courseId === section.id).reduce((sum, task) => sum + task.duration, 0) }))).map(insight => `<div class="plan-course-row"><div><strong>${insight.name}</strong><span>${insight.taskCount} 個任務</span></div><strong>${insight.minutes} 分鐘</strong></div>`).join("");
   const reasons = (analysis.reasons || ["優先處理較不熟悉的課程", "避開固定課程與生活行程", "保留週末彈性時段"]).map(reason => `<li>${reason}</li>`).join("");
   return shell(`<section class="content stack-lg plan-preview-page">${setupProgress(4)}
-    <div><div class="eyebrow">步驟 4／4・AI 計畫預覽</div><h1 class="page-title">先確認這週怎麼讀</h1><p class="muted">目前使用獨立的 Mock Analysis Engine。之後可直接替換成你們的 FastAPI 分析結果。</p></div>
+    <div><div class="eyebrow">步驟 4／4・設定完成</div><h1 class="page-title">決定這次要規劃多久</h1><p class="muted">自行選擇計畫的開始與結束日期，不必受限於一週或一學期。</p></div>
+    <section class="plan-range-card" aria-labelledby="plan-range-title">
+      <div class="plan-range-heading"><div><span class="shared-badge">自訂規劃期間</span><h2 id="plan-range-title">計畫生成區間</h2><p>系統會依這段期間內的課表、評量與空閒時間安排讀書任務。</p></div><div class="plan-range-summary ${range.valid ? "valid" : "invalid"}" data-plan-range-summary>${range.label}</div></div>
+      <div class="plan-range-fields">
+        <div class="field"><label for="plan-start-date">開始日期</label><input id="plan-start-date" type="date" data-plan-range="startDate" value="${state.planRange.startDate}" /></div>
+        <div class="field"><label for="plan-end-date">結束日期</label><input id="plan-end-date" type="date" data-plan-range="endDate" value="${state.planRange.endDate}" /></div>
+      </div>
+      <div class="plan-range-note">日期之後仍可回到設定修改；重新產生時會保留已完成的回饋紀錄。</div>
+    </section>
     <div class="plan-preview-layout">
       <div class="stack">
-        <div class="plan-summary-grid"><div class="metric-card"><span>已分析課程</span><strong>${count} 門</strong></div><div class="metric-card"><span>已安排空堂</span><strong>${summary.totalTasks} 個</strong></div><div class="metric-card"><span>預計投入</span><strong>${Math.floor(summary.totalMinutes / 60)} 小時 ${summary.totalMinutes % 60} 分</strong></div></div>
+        <div class="plan-summary-grid"><div class="metric-card"><span>規劃天數</span><strong data-plan-range-days>${range.valid ? `${range.days} 天` : "待設定"}</strong></div><div class="metric-card"><span>已分析課程</span><strong>${count} 門</strong></div><div class="metric-card"><span>已安排空堂</span><strong>${summary.totalTasks} 個</strong></div><div class="metric-card"><span>預計投入</span><strong>${Math.floor(summary.totalMinutes / 60)} 小時 ${summary.totalMinutes % 60} 分</strong></div></div>
         <section class="card stack"><div class="row-between"><h2 class="section-title">各科時間分配</h2><span class="status ai">Mock AI</span></div><div class="plan-course-list">${insightRows}</div></section>
       </div>
       <aside class="card ai-explanation stack"><div><div class="eyebrow">排程依據</div><h2 class="section-title">為什麼這樣安排？</h2></div><ul>${reasons}</ul><div class="analysis-warning">${analysis.warnings?.[0] || "目前負擔適中，仍保留調整空間。"}</div></aside>
     </div>
-    <div class="completion-actions"><button class="btn primary" data-action="finish-setup">確認並開始計畫</button><button class="btn secondary" data-action="back-availability">返回修改條件</button></div>
-  </section>`, "AI 計畫預覽");
+    <div class="completion-actions"><button class="btn primary" data-action="finish-setup">依此日期生成計畫</button><button class="btn secondary" data-action="back-availability">返回修改條件</button></div>
+  </section>`, "設定完成");
 }
 
 function periodIdForTask(task) {
@@ -788,6 +867,7 @@ function taskCard(task, highlighted = false) {
 
 function calendarPage() {
   const days = currentWeekDays();
+  const range = planRangeDetails();
   const dayColumn = ({ day, label, short: date }) => {
     const items = dailyAgenda(day).map(item => {
       if (item.type === "study") return `<button class="plan-item study ${item.task.done ? "done" : ""}" data-action="open-task-detail" data-id="${item.task.id}"><span>${item.time}・讀書</span><strong>${item.task.course}</strong><small>${item.title}</small></button>`;
@@ -795,7 +875,7 @@ function calendarPage() {
     }).join("");
     return `<section class="plan-day ${day === currentDayKey() ? "today" : ""}"><header><span>週${label}</span><strong>${date}</strong></header><div class="plan-day-items">${items}</div></section>`;
   };
-  return shell(`<section class="content stack-lg plan-page"><div class="row-between plan-heading"><div><div class="eyebrow">本週計畫</div><h1 class="page-title">每個時段要做什麼</h1><p class="muted">固定課程與生活行程先占位，AI 再將讀書任務放進可用時段，其他時間清楚標示休息或彈性用途。</p></div><button class="btn primary" data-action="regenerate-plan">依目前課表重新規劃</button></div><section class="card ai-plan-summary"><div><span class="status ai">Mock AI</span><strong>已完成逐時段安排</strong><p>不是只計算剩餘時間，而是指定每個可用時段的科目與行動。</p></div><button class="btn secondary" data-action="show-analysis-reasons">查看排程依據</button></section><div class="week-plan">${days.map(dayColumn).join("")}</div></section>`, "計畫");
+  return shell(`<section class="content stack-lg plan-page"><div class="row-between plan-heading"><div><div class="eyebrow">${range.valid ? range.label : "目前規劃期間"}・本週執行</div><h1 class="page-title">本週每個時段要做什麼</h1><p class="muted">這裡顯示整體規劃期間中的本週安排；固定課程與生活行程先占位，AI 再將讀書任務放進可用時段。</p></div><button class="btn primary" data-action="regenerate-plan">依目前課表重新規劃</button></div><section class="card ai-plan-summary"><div><span class="status ai">Mock AI</span><strong>已完成逐時段安排</strong><p>不是只計算剩餘時間，而是指定每個可用時段的科目與行動。</p></div><button class="btn secondary" data-action="show-analysis-reasons">查看排程依據</button></section><div class="week-plan">${days.map(dayColumn).join("")}</div></section>`, "計畫");
 }
 
 function courseAssessment(section, index = 0) {
@@ -1146,7 +1226,7 @@ function handleActionButton(actionButton) {
     "confirm-assessment": () => setState({ setupStep: 4 }),
     "back-assessment": () => setState({ setupStep: 3 }),
     "back-availability": () => setState({ setupComplete: false, setupStep: 4 }),
-    "finish-setup": () => setState({ setupComplete: true, route: "today" }),
+    "finish-setup": () => finishSetup(),
     "start-task": () => {
       state.tasks = state.tasks.map(task => task.id === id ? { ...task, status: "in_progress", startedAt: new Date().toISOString() } : task);
       document.querySelector(".modal-backdrop")?.remove();
@@ -1280,6 +1360,7 @@ document.addEventListener("change", async (event) => {
     }
     return;
   }
+  if (updatePlanRange(event.target)) return;
   if (updateGlobalStudySetting(event.target)) return;
   if (updateCoursePreference(event.target)) return;
   if (event.target.id === "school") {
@@ -1308,6 +1389,7 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (updatePlanRange(event.target)) return;
   if (updateGlobalStudySetting(event.target)) return;
   if (updateCoursePreference(event.target)) return;
   if (event.target.matches("[data-supplement-note]")) {
@@ -1466,7 +1548,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=37", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=38", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
