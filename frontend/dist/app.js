@@ -947,7 +947,16 @@ function taskDetailModal(id) {
 }
 
 function settingsModal() {
-  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改後可重新產生計畫；目前完成狀況會保留在這台裝置。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>共用讀書設定與各科熟悉度、難度、目標</small></span><span>修改</span></button></div></section></div>`;
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title"><section class="modal stack-lg settings-modal"><div class="row-between"><div><div class="eyebrow">設定</div><h2 id="settings-title" class="page-title">調整你的規劃資料</h2></div><button class="btn ghost small-btn" data-action="close-modal">關閉</button></div><p class="muted">修改課表或學習偏好後會重新產生計畫，未完成任務的時段可能改變。</p><div class="settings-links"><button type="button" data-action="settings-profile"><span><strong>基本資料</strong><small>學校與年級</small></span><span>修改</span></button><button type="button" data-action="settings-timetable"><span><strong>課表與生活行程</strong><small>課程、打工、運動等固定時間</small></span><span>修改</span></button><button type="button" data-action="settings-learning"><span><strong>學習偏好</strong><small>共用讀書設定與各科熟悉度、難度、目標</small></span><span>修改</span></button></div></section></div>`;
+}
+
+function settingsEditConfirmation(target) {
+  const timetable = target === "timetable";
+  const title = timetable ? "即將修改課表與行程" : "即將修改學習偏好";
+  const description = timetable
+    ? "課程或固定行程改變後，原本可用的讀書時段也會改變。"
+    : "熟悉度、難度、目標或共用讀書設定改變後，各科任務分配也會改變。";
+  return `<div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-edit-title"><section class="modal stack-lg settings-edit-confirmation"><div><div class="eyebrow">修改前確認</div><h2 id="settings-edit-title" class="page-title">${title}</h2><p class="muted">${description}</p></div><div class="card warning small"><strong>儲存修改後將重新排程。</strong><br>系統會重新確認規劃日期並產生新的未完成任務安排。</div><div class="button-grid"><button type="button" class="btn secondary" data-action="cancel-settings-edit">取消</button><button type="button" class="btn primary" data-action="confirm-settings-edit" data-settings-target="${target}">確定修改</button></div></section></div>`;
 }
 
 function resetPlannerModal() {
@@ -1153,8 +1162,15 @@ function handleActionButton(actionButton) {
       window.scrollTo(0, 0);
     },
     "settings-profile": () => setState({ setupComplete: false, setupStep: 0 }),
-    "settings-timetable": () => setState({ setupComplete: false, setupStep: 1 }),
-    "settings-learning": () => setState({ setupComplete: false, setupStep: 4 }),
+    "settings-timetable": () => openDynamicModal(settingsEditConfirmation("timetable")),
+    "settings-learning": () => openDynamicModal(settingsEditConfirmation("learning")),
+    "cancel-settings-edit": () => openDynamicModal(settingsModal()),
+    "confirm-settings-edit": () => {
+      const target = actionButton.dataset.settingsTarget;
+      if (!['timetable', 'learning'].includes(target)) return;
+      setState({ setupComplete: false, setupStep: target === "timetable" ? 1 : 4 });
+      window.scrollTo(0, 0);
+    },
     "goto-setup-step": () => goToSetupTarget(actionButton),
     "open-cell": () => {
       state.activeCell = actionButton.dataset.cell;
@@ -1548,7 +1564,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=38", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=39", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
