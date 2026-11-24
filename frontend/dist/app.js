@@ -887,18 +887,29 @@ function calendarPage() {
   const firstDay = days[0]?.date;
   const lastDay = days.at(-1)?.date;
   const weekRangeLabel = firstDay && lastDay ? `${firstDay.getMonth() + 1}/${firstDay.getDate()}－${lastDay.getMonth() + 1}/${lastDay.getDate()}` : "";
-  const dayColumn = ({ day, label, short: date }) => {
-    const items = dailyAgenda(day).map(item => {
-      if (item.type === "study") return `<button class="plan-item study ${item.task.done ? "done" : ""}" data-action="open-task-detail" data-id="${item.task.id}"><span>${item.time}・讀書</span><strong>${item.task.course}</strong><small>${item.title}</small></button>`;
-      return `<div class="plan-item ${item.type}"><span>${item.time}・${item.type === "course" ? "課程" : item.type === "custom" ? "行程" : item.type === "rest" ? "休息" : "彈性"}</span><strong>${item.title}</strong><small>${item.detail}</small></div>`;
+  const today = dateInputValue(dateForOffset());
+  const columns = days.map(day => ({ ...day, slots: dailyAgenda(day.day) }));
+  const header = columns.map(({ date, label, short }) => {
+    const isToday = dateInputValue(date) === today;
+    return `<th scope="col" ${isToday ? 'aria-current="date" class="current-day"' : ""}>週${label}<span>${short}${isToday ? "・今日" : ""}</span></th>`;
+  }).join("");
+  const rows = PERIODS.map(([, time], index) => {
+    const cells = columns.map(({ slots }) => {
+      const item = slots[index];
+      if (item.type === "flex") return '<td aria-label="空閒"></td>';
+      if (item.type === "study") {
+        const done = taskProgressPercent(item.task) === 100;
+        return `<td class="study"><button type="button" data-action="open-task-detail" data-id="${item.task.id}"><strong>${escapeHtml(item.task.course)}</strong><span>${escapeHtml(item.title)}</span>${done ? "<small>已完成</small>" : ""}</button></td>`;
+      }
+      return `<td class="${item.type}"><strong>${escapeHtml(item.title)}</strong></td>`;
     }).join("");
-    const columnDate = days.find(item => item.day === day && item.short === date)?.date;
-    const isToday = columnDate && dateInputValue(columnDate) === dateInputValue(dateForOffset());
-    return `<section class="plan-day ${isToday ? "today" : ""}"><header><span>週${label}</span><strong>${date}</strong></header><div class="plan-day-items">${items}</div></section>`;
-  };
+    const [start, end] = time.split("–");
+    return `<tr><th scope="row"><span>${start}–</span><span>${end}</span></th>${cells}</tr>`;
+  }).join("");
+  const timetable = `<div class="week-table-scroll" role="region" aria-label="週課表，可橫向捲動" tabindex="0"><table class="week-table" aria-label="第 ${activeWeek + 1} 週課表" style="--day-columns:${days.length}"><thead><tr><th scope="col">時間</th>${header}</tr></thead><tbody>${rows}</tbody></table></div>`;
   const pageButtons = Array.from({ length: totalWeeks }, (_, index) => `<button type="button" class="week-page-number ${index === activeWeek ? "active" : ""}" data-action="go-plan-week" data-week-page="${index}" aria-label="前往第 ${index + 1} 週" aria-current="${index === activeWeek ? "page" : "false"}">${index + 1}</button>`).join("");
   const pagination = `<section class="week-pagination"><div class="week-pagination-copy"><span>週計畫</span><strong>第 ${activeWeek + 1} 週／共 ${totalWeeks} 週</strong><small>${weekRangeLabel}</small></div><div class="week-pagination-actions"><button type="button" class="btn secondary small-btn" data-action="previous-plan-week" ${activeWeek === 0 ? "disabled" : ""}>上一週</button><div class="week-page-numbers" aria-label="週計畫頁數">${pageButtons}</div><button type="button" class="btn primary small-btn" data-action="next-plan-week" ${activeWeek === totalWeeks - 1 ? "disabled" : ""}>下一週</button></div></section>`;
-  return shell(`<section class="content stack-lg plan-page"><div class="row-between plan-heading"><div><div class="eyebrow">${range.valid ? range.label : "目前規劃期間"}</div><h1 class="page-title">每週每個時段要做什麼</h1><p class="muted">每 7 天分成一頁；固定課程與生活行程先占位，AI 再將讀書任務放進可用時段。</p></div><button class="btn primary" data-action="regenerate-plan">依目前課表重新規劃</button></div><section class="card ai-plan-summary"><div><span class="status ai">Mock AI</span><strong>已完成逐時段安排</strong><p>不是只計算剩餘時間，而是指定每個可用時段的科目與行動。</p></div><button class="btn secondary" data-action="show-analysis-reasons">查看排程依據</button></section>${pagination}<div class="week-plan">${days.map(dayColumn).join("")}</div></section>`, "計畫");
+  return shell(`<section class="content stack-lg plan-page"><div class="row-between plan-heading"><div><div class="eyebrow">${range.valid ? range.label : "目前規劃期間"}</div><h1 class="page-title">每週計畫</h1></div><button class="btn primary" data-action="regenerate-plan">依目前課表重新規劃</button></div>${pagination}<div class="week-table-tools"><div class="week-table-legend" aria-label="課表圖例"><span class="course">課程</span><span class="study">讀書</span><span class="custom">行程</span></div><button class="btn secondary small-btn" data-action="show-analysis-reasons">查看排程依據</button></div>${timetable}</section>`, "計畫");
 }
 
 function courseAssessment(section, index = 0) {
@@ -1647,7 +1658,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=42", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=43", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });

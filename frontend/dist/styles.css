@@ -1042,24 +1042,32 @@ button.agenda-row { width: 100%; cursor: pointer; }
 .week-page-number:hover { border-color: #9fc8f5; color: var(--primary); }
 .week-page-number.active { border-color: var(--primary); background: var(--primary); color: #fff; }
 .week-pagination button:disabled { opacity: .42; cursor: not-allowed; }
-.week-plan { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
-.plan-day { min-height: 340px; border: 1px solid var(--border); border-radius: 15px; background: #fff; overflow: hidden; }
-.plan-day.today { border-color: #9fc8f5; box-shadow: 0 8px 24px rgba(23,105,210,.08); }
-.plan-day > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; background: var(--surface); }
-.plan-day.today > header { background: var(--primary-soft); color: var(--primary); }
-.plan-day > header span { font-size: 12px; font-weight: 750; }
-.plan-day > header strong { font-size: 12px; }
-.plan-day-items { display: grid; gap: 7px; max-height: 720px; overflow-y: auto; padding: 9px; }
-.plan-item { display: grid; gap: 3px; width: 100%; padding: 9px; border: 0; border-left: 3px solid; border-radius: 9px; text-align: left; color: var(--text); }
-.plan-item span { font-size: 10px; font-weight: 750; text-transform: uppercase; }
-.plan-item strong { font-size: 12px; }
-.plan-item small { color: var(--muted); font-size: 10px; line-height: 1.35; }
-.plan-item.course { background: #edf4fb; border-color: #4d83b7; }
-.plan-item.custom { background: var(--success-soft); border-color: var(--success); }
-.plan-item.study { background: #f3efff; border-color: #7b61c9; cursor: pointer; }
-.plan-item.rest { background: var(--warning-soft); border-color: #d59b34; }
-.plan-item.flex { background: var(--surface); border-color: #c3cad4; color: var(--muted); }
-.plan-item.done { opacity: .58; }
+.week-table-tools, .week-table-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.week-table-tools { justify-content: space-between; }
+.week-table-legend span { padding: 4px 9px; border-radius: 6px; font-size: 14px; font-weight: 700; }
+.week-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+.week-table { width: 100%; min-width: calc(70px + var(--day-columns) * 90px); table-layout: fixed; border-spacing: 0; text-align: center; font-size: 14px; }
+.week-table :is(th, td) { padding: 8px 5px; border-inline-end: 1px solid var(--border); border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.week-table tr > :last-child { border-inline-end: 0; }
+.week-table tbody tr:last-child > * { border-block-end: 0; }
+.week-table thead th { color: #fff; background: #2c68a3; }
+.week-table thead .current-day { background: #174f88; }
+.week-table th:first-child { position: sticky; left: 0; z-index: 1; width: 70px; }
+.week-table tbody th { height: 56px; color: #315b82; background: #f3f7fb; }
+.week-table th span { display: block; font-size: 12px; line-height: 1.4; }
+.week-table td { background: #fff; }
+.week-table .course, .week-table-legend .course { background: #eaf3ff; color: #174f88; }
+.week-table .study, .week-table-legend .study { background: #f3efff; color: #503a91; }
+.week-table .custom, .week-table-legend .custom { background: #edf8f2; color: #17664e; }
+.week-table .rest { background: #fffaf0; color: #775a2c; font-size: 13px; }
+.week-table td.study { padding: 0; }
+.week-table td button { display: grid; justify-items: center; gap: 3px; width: 100%; padding: 8px 5px; border: 0; background: transparent; color: inherit; font: inherit; line-height: 1.35; cursor: pointer; }
+.week-table td button span, .week-table td button small { font-size: 12px; }
+.week-table td button:hover { background: #e8e0fa; }
+.week-table td button:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.week-pagination-actions { min-width: 0; flex-wrap: wrap; }
+.week-page-numbers { min-width: 0; overflow-x: auto; }
+.week-page-number { flex-shrink: 0; }
 .plan-empty { padding: 18px 8px; color: #9aa4b2; font-size: 12px; text-align: center; }
 .course-overview-grid { display: grid; gap: 14px; }
 .course-overview-card { display: grid; gap: 15px; padding: 17px; border: 1px solid var(--border); border-radius: 16px; background: #fff; }
