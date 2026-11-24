@@ -1062,6 +1062,23 @@ button.agenda-row { width: 100%; cursor: pointer; }
 .range-switch button { min-height: 34px; border: 0; border-radius: 8px; padding: 6px 11px; background: transparent; color: var(--muted); font-weight: 750; cursor: pointer; }
 .range-switch button.active { background: #fff; color: var(--primary); box-shadow: 0 1px 4px rgba(23,32,51,.12); }
 .review-course-list { display: grid; }
+.today-study-progress { border-color: #cfe0f6; background: #fbfdff; }
+.today-study-progress > .row-between { align-items: flex-start; }
+.today-study-progress .section-title { margin-bottom: 5px; }
+.today-study-progress p { margin: 0; font-size: 13px; }
+.today-study-average { flex: 0 0 auto; padding: 8px 11px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: 13px; }
+.today-study-list { display: grid; gap: 12px; }
+.today-study-item { display: grid; gap: 12px; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
+.today-study-copy { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.today-study-copy > div { display: grid; gap: 4px; }
+.today-study-copy strong { font-size: 15px; }
+.today-study-copy small { color: var(--muted); font-size: 12px; }
+.today-study-time { color: var(--primary); font-size: 13px; font-weight: 750; }
+.today-study-percent { min-width: 42px; color: var(--primary); font-weight: 800; text-align: right; }
+.progress-options { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.progress-options button { min-height: 38px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--muted); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.progress-options button:hover { border-color: #99bce7; background: #f5f9ff; color: var(--primary); }
+.progress-options button.active { border-color: var(--primary); background: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(22,102,202,.16); }
 .review-course-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(90px, 1.2fr) 45px; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #edf0f4; }
 .review-course-row:last-child { border-bottom: 0; }
 .review-course-row > div:first-child { display: grid; gap: 3px; }
@@ -1113,6 +1130,10 @@ html[data-view-mode="mobile"] .plan-diff { grid-template-columns: 1fr; }
 html[data-view-mode="mobile"] .diff-line { width: 2px; height: 24px; justify-self: center; }
 html[data-view-mode="mobile"] .agenda-row { grid-template-columns: 82px 52px minmax(0, 1fr); gap: 8px; }
 html[data-view-mode="mobile"] .agenda-status { grid-column: 3; }
+html[data-view-mode="mobile"] .today-study-progress > .row-between { display: grid; }
+html[data-view-mode="mobile"] .today-study-average { justify-self: start; }
+html[data-view-mode="mobile"] .today-study-copy { grid-template-columns: minmax(0, 1fr) auto; }
+html[data-view-mode="mobile"] .today-study-time { grid-column: 1 / -1; }
 
 @media (max-width: 640px) {
   .today-heading, .plan-heading { display: grid; }
@@ -1127,6 +1148,10 @@ html[data-view-mode="mobile"] .agenda-status { grid-column: 3; }
   .plan-range-fields { grid-template-columns: 1fr; }
   .course-overview-meta, .detail-pairs { grid-template-columns: 1fr 1fr; }
   .review-course-row { grid-template-columns: minmax(110px, 1fr) 70px 38px; gap: 8px; }
+  .today-study-progress > .row-between { display: grid; }
+  .today-study-average { justify-self: start; }
+  .today-study-copy { grid-template-columns: minmax(0, 1fr) auto; }
+  .today-study-time { grid-column: 1 / -1; }
   .plan-diff { grid-template-columns: 1fr; }
   .agenda-row { grid-template-columns: 82px 52px minmax(0, 1fr); gap: 8px; }
   .agenda-status { grid-column: 3; }
