@@ -1031,6 +1031,17 @@ button.agenda-row { width: 100%; cursor: pointer; }
 .ai-plan-summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; background: #faf9ff; border-color: #ddd5ff; }
 .ai-plan-summary > div { display: grid; gap: 5px; }
 .ai-plan-summary p { margin: 0; color: var(--muted); font-size: 13px; }
+.week-pagination { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 17px; border: 1px solid #cfe0f6; border-radius: 15px; background: #f8fbff; }
+.week-pagination-copy { display: grid; gap: 3px; }
+.week-pagination-copy span { color: var(--primary); font-size: 12px; font-weight: 750; }
+.week-pagination-copy strong { font-size: 17px; }
+.week-pagination-copy small { color: var(--muted); font-size: 12px; }
+.week-pagination-actions { display: flex; align-items: center; gap: 9px; }
+.week-page-numbers { display: flex; align-items: center; gap: 5px; }
+.week-page-number { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--muted); font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+.week-page-number:hover { border-color: #9fc8f5; color: var(--primary); }
+.week-page-number.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.week-pagination button:disabled { opacity: .42; cursor: not-allowed; }
 .week-plan { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
 .plan-day { min-height: 340px; border: 1px solid var(--border); border-radius: 15px; background: #fff; overflow: hidden; }
 .plan-day.today { border-color: #9fc8f5; box-shadow: 0 8px 24px rgba(23,105,210,.08); }
@@ -1136,6 +1147,8 @@ html[data-view-mode="mobile"] .ai-plan-summary .btn { width: 100%; }
 html[data-view-mode="mobile"] .plan-range-heading { display: grid; }
 html[data-view-mode="mobile"] .plan-range-summary { max-width: none; }
 html[data-view-mode="mobile"] .plan-range-fields { grid-template-columns: 1fr; }
+html[data-view-mode="mobile"] .week-pagination { display: grid; }
+html[data-view-mode="mobile"] .week-pagination-actions { display: grid; grid-template-columns: 1fr auto 1fr; }
 html[data-view-mode="mobile"] .plan-diff { grid-template-columns: 1fr; }
 html[data-view-mode="mobile"] .diff-line { width: 2px; height: 24px; justify-self: center; }
 html[data-view-mode="mobile"] .agenda-row { grid-template-columns: 82px 52px minmax(0, 1fr); gap: 8px; }
@@ -1156,6 +1169,8 @@ html[data-view-mode="mobile"] .today-study-time { grid-column: 1 / -1; }
   .plan-range-heading { display: grid; }
   .plan-range-summary { max-width: none; }
   .plan-range-fields { grid-template-columns: 1fr; }
+  .week-pagination { display: grid; }
+  .week-pagination-actions { display: grid; grid-template-columns: 1fr auto 1fr; }
   .course-overview-meta, .detail-pairs { grid-template-columns: 1fr 1fr; }
   .review-course-row { grid-template-columns: minmax(110px, 1fr) 70px 38px; gap: 8px; }
   .today-study-progress > .row-between { display: grid; }
