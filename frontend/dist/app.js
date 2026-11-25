@@ -208,6 +208,7 @@ const defaultState = {
   calendarDay: "thu",
   replanReason: "臨時有事",
   reviewRange: "week",
+  reviewHistory: [],
   activeCourseId: "",
   planRevisions: [],
   pendingReplan: null,
@@ -216,11 +217,21 @@ const defaultState = {
   toast: "",
 };
 
-function normalizeTask(task, index) {
+function normalizeTask(task, index, reference = dateForOffset()) {
   const isDone = task.done || task.status === "done";
+  const day = task.day || dayKeyForDate(reference);
+  const mondayOffset = (reference.getDay() + 6) % 7;
+  const taskOffset = (DAY_SEQUENCE.indexOf(day) + 6) % 7;
+  const fallbackDate = new Date(reference);
+  fallbackDate.setDate(reference.getDate() - mondayOffset + taskOffset);
+  const legacyDate = /^(\d{1,2})[\/月](\d{1,2})/.exec(task.dateLabel || "");
+  const recordedDate = legacyDate
+    ? [-1, 0, 1].map(offset => new Date(reference.getFullYear() + offset, Number(legacyDate[1]) - 1, Number(legacyDate[2]), 12))
+      .sort((a, b) => Math.abs(a - reference) - Math.abs(b - reference))[0]
+    : fallbackDate;
+  const scheduledDate = parseDateInput(task.scheduledDate) || recordedDate;
   return {
-    day: currentDayKey(),
-    dateLabel: dateLabelForDay(task.day || currentDayKey()),
+    day,
     courseId: "",
     type: "review",
     source: "課綱與學習設定",
@@ -231,7 +242,8 @@ function normalizeTask(task, index) {
     rationale: "依課程優先度與可用時段安排。",
     status: task.done ? "done" : "pending",
     ...task,
-    dateLabel: dateLabelForDay(task.day || currentDayKey()),
+    scheduledDate: dateInputValue(scheduledDate),
+    dateLabel: shortDateLabel(scheduledDate),
     completionProgress: isDone ? 100 : Number(task.completionProgress) || 0,
   };
 }
@@ -259,7 +271,12 @@ function loadState() {
         bufferDays: String(previousPreference.bufferDays || "7"),
       };
     }
-    loaded.tasks = migrateLegacyTaskDates(loaded.tasks || []).map(normalizeTask);
+    const generatedAt = new Date(loaded.analysis?.generatedAt || dateForOffset());
+    const reference = Number.isNaN(generatedAt.getTime()) ? dateForOffset() : generatedAt;
+    const tasks = loaded.tasks || [];
+    const isLegacyDemo = tasks.length && tasks.every(task => !task.scheduledDate && [1, 2, 3].includes(task.id));
+    loaded.tasks = (isLegacyDemo ? migrateLegacyTaskDates(tasks) : tasks)
+      .map((task, index) => normalizeTask(task, index, reference));
     loaded.planRevisions ||= [];
     loaded.highestSetupStage = Math.max(loaded.highestSetupStage || 1, loaded.setupComplete ? 4 : logicalStageForSetupStep(loaded.setupStep));
     return loaded;
@@ -623,8 +640,12 @@ async function runMockAnalysis() {
   state.analysisStatus = "loading";
   save();
   const analysis = await engine.analyzePlan(analysisInput());
+  const today = dateInputValue();
+  state.reviewHistory.push(...state.tasks.filter(task =>
+    task.scheduledDate && (task.scheduledDate < today || taskProgressPercent(task) > 0)
+  ));
   state.analysis = analysis;
-  state.tasks = analysis.tasks.map(normalizeTask);
+  state.tasks = analysis.tasks.map((task, index) => normalizeTask(task, index));
   state.analysisStatus = "ready";
   save();
   return analysis;
@@ -962,21 +983,60 @@ function todaySidebarStudyProgress(tasks) {
   return `<section class="card today-sidebar-progress stack"><div><div class="eyebrow">今日讀書進度</div><p class="small muted">選擇每項 AI 讀書計畫目前的完成度。</p></div>${items ? `<div class="today-sidebar-study-list">${items}</div>` : `<div class="empty-results">今天沒有 AI 安排的讀書任務。</div>`}<button class="btn secondary block" data-nav="calendar">查看完整計畫</button></section>`;
 }
 
+const REVIEW_RANGES = { day: "今日", week: "本週", month: "本月", year: "今年" };
+
+function reviewPeriod(range, today = dateForOffset()) {
+  const start = new Date(today);
+  const end = new Date(today);
+  if (range === "week") {
+    start.setDate(today.getDate() - (today.getDay() + 6) % 7);
+    end.setTime(start.getTime());
+    end.setDate(start.getDate() + 6);
+  } else if (range === "month") {
+    start.setDate(1);
+    end.setMonth(today.getMonth() + 1, 0);
+  } else if (range === "year") {
+    start.setMonth(0, 1);
+    end.setMonth(11, 31);
+  }
+  return [dateInputValue(start), dateInputValue(end)];
+}
+
 function progressPage() {
-  const todayTasks = state.tasks.filter(task => task.day === currentDayKey());
-  const visibleTasks = state.reviewRange === "day" ? todayTasks : state.tasks;
+  const range = Object.hasOwn(REVIEW_RANGES, state.reviewRange) ? state.reviewRange : "week";
+  const [start, end] = reviewPeriod(range);
+  const withinPeriod = date => date >= start && date <= end;
+  const visibleTasks = [...state.reviewHistory, ...state.tasks].filter(task => withinPeriod(task.scheduledDate));
+  const replans = state.planRevisions.filter(revision => revision.applied && withinPeriod(dateInputValue(new Date(revision.id)))).length;
   const completedTasks = visibleTasks.filter(task => taskProgressPercent(task) === 100);
   const estimated = completedTasks.reduce((sum, task) => sum + (task.estimatedMinutes || task.duration), 0);
   const actual = completedTasks.reduce((sum, task) => sum + (task.actualMinutes || task.duration), 0);
   const completionRate = visibleTasks.length ? Math.round(visibleTasks.reduce((sum, task) => sum + taskProgressPercent(task), 0) / visibleTasks.length) : 0;
-  const courseRows = selectedSections().map(section => {
-    const tasks = visibleTasks.filter(task => task.courseId === section.id);
+  const courses = new Map(visibleTasks.map(task => [task.courseId || task.course, task.course]));
+  const courseRows = [...courses].map(([courseId, courseName]) => {
+    const tasks = visibleTasks.filter(task => (task.courseId || task.course) === courseId);
     const done = tasks.filter(task => taskProgressPercent(task) === 100).length;
     const rate = tasks.length ? Math.round(tasks.reduce((sum, task) => sum + taskProgressPercent(task), 0) / tasks.length) : 0;
-    return `<div class="review-course-row"><div><strong>${section.name}</strong><span>${done}／${tasks.length} 任務完成</span></div><div class="mini-progress"><span style="width:${rate}%"></span></div><strong>${rate}%</strong></div>`;
+    return `<div class="review-course-row"><div><strong>${escapeHtml(courseName)}</strong><span>${done}／${tasks.length} 任務完成</span></div><div class="mini-progress"><span style="width:${rate}%"></span></div><strong>${rate}%</strong></div>`;
   }).join("");
-  const rangeLabel = state.reviewRange === "day" ? "今日完成度" : "本週完成度";
-  return shell(`<section class="content stack-lg review-page"><div class="row-between"><div><div class="eyebrow">學習進度</div><h1 class="page-title">看見實際投入與調整原因</h1></div><div class="range-switch"><button class="${state.reviewRange === "day" ? "active" : ""}" data-review-range="day">今日</button><button class="${state.reviewRange === "week" ? "active" : ""}" data-review-range="week">本週</button></div></div><div class="review-metrics"><div class="metric-card"><span>${rangeLabel}</span><strong>${completionRate}%</strong></div><div class="metric-card"><span>實際投入</span><strong>${actual} 分鐘</strong></div><div class="metric-card"><span>與預估差異</span><strong>${actual - estimated >= 0 ? "+" : ""}${actual - estimated} 分鐘</strong></div><div class="metric-card"><span>重新排程</span><strong>${state.replanCount} 次</strong></div></div><div class="review-layout"><section class="card stack"><h2 class="section-title">各科進度</h2><div class="review-course-list">${courseRows}</div></section><aside class="card review-suggestion stack"><span class="status ai">Mock AI 建議</span><h2>下週縮短單次任務長度</h2><p>若實際時間持續高於預估，建議將高難度課程拆成 25–45 分鐘的小任務。</p><button class="btn primary" data-action="apply-review-suggestion">預覽下週調整</button></aside></div></section>`, "進度");
+  const rangeLabel = REVIEW_RANGES[range] + "完成度";
+  const rangeButtons = Object.entries(REVIEW_RANGES).map(([key, label]) =>
+    `<button type="button" class="${key === range ? "active" : ""}" data-review-range="${key}" aria-pressed="${key === range}">${label}</button>`
+  ).join("");
+  const dateLabel = start === end ? start.replaceAll("-", "/") : `${start.replaceAll("-", "/")}－${end.replaceAll("-", "/")}`;
+  return shell(`<section class="content stack-lg review-page">
+    <div class="row-between review-heading"><div><h1 class="page-title">學習進度</h1><p class="muted">${dateLabel}</p></div><div class="range-switch" role="group" aria-label="進度日期範圍">${rangeButtons}</div></div>
+    <div class="review-metrics">
+      <div class="metric-card"><span>${rangeLabel}</span><strong>${visibleTasks.length ? completionRate + "%" : "—"}</strong></div>
+      <div class="metric-card"><span>實際投入</span><strong>${actual} 分鐘</strong></div>
+      <div class="metric-card"><span>與預估差異</span><strong>${actual - estimated >= 0 ? "+" : ""}${actual - estimated} 分鐘</strong></div>
+      <div class="metric-card"><span>重新排程</span><strong>${replans} 次</strong></div>
+    </div>
+    <div class="review-layout">
+      <section class="card stack"><h2 class="section-title">各科進度</h2><div class="review-course-list">${courseRows || '<div class="empty-results">這段期間沒有讀書任務。</div>'}</div></section>
+      <aside class="card review-suggestion stack"><span class="status ai">Mock AI 建議</span><h2>下週縮短單次任務長度</h2><p>若實際時間持續高於預估，建議將高難度課程拆成 25–45 分鐘的小任務。</p><button class="btn primary" data-action="apply-review-suggestion">預覽下週調整</button></aside>
+    </div>
+  </section>`, "進度");
 }
 
 function taskModal(id) {
@@ -1350,7 +1410,7 @@ function handleActionButton(actionButton) {
       const suggestedDate = dateForOffset(1);
       const suggestedDay = dayKeyForDate(suggestedDate);
       const suggestedLabel = shortDateLabel(suggestedDate);
-      state.tasks = state.tasks.map(task => task.id === id ? { ...task, day: suggestedDay, dateLabel: suggestedLabel, time: "10:00–11:00", status: "rescheduled" } : task);
+      state.tasks = state.tasks.map(task => task.id === id ? { ...task, day: suggestedDay, scheduledDate: dateInputValue(suggestedDate), dateLabel: suggestedLabel, time: "10:00–11:00", status: "rescheduled" } : task);
       state.replanCount += 1;
       state.planRevisions.push({ id: Date.now(), taskId: id, reason: state.pendingReplan?.reason || "整體負擔調整", before: `${before?.dateLabel} ${before?.time}`, after: `${suggestedLabel} 10:00–11:00`, applied: true });
       state.pendingReplan = null;
@@ -1658,7 +1718,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=44", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=45", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
