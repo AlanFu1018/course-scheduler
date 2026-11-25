@@ -1059,7 +1059,6 @@ button.agenda-row { width: 100%; cursor: pointer; }
 .week-table .course, .week-table-legend .course { background: #eaf3ff; color: #174f88; }
 .week-table .study, .week-table-legend .study { background: #f3efff; color: #503a91; }
 .week-table .custom, .week-table-legend .custom { background: #edf8f2; color: #17664e; }
-.week-table .rest { background: #fffaf0; color: #775a2c; font-size: 13px; }
 .week-table td.study { padding: 0; }
 .week-table td button { display: grid; justify-items: center; gap: 3px; width: 100%; padding: 8px 5px; border: 0; background: transparent; color: inherit; font: inherit; line-height: 1.35; cursor: pointer; }
 .week-table td button span, .week-table td button small { font-size: 12px; }

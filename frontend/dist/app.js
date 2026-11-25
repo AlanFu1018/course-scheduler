@@ -896,7 +896,7 @@ function calendarPage() {
   const rows = PERIODS.map(([, time], index) => {
     const cells = columns.map(({ slots }) => {
       const item = slots[index];
-      if (item.type === "flex") return '<td aria-label="空閒"></td>';
+      if (item.type === "flex" || item.type === "rest") return "<td></td>";
       if (item.type === "study") {
         const done = taskProgressPercent(item.task) === 100;
         return `<td class="study"><button type="button" data-action="open-task-detail" data-id="${item.task.id}"><strong>${escapeHtml(item.task.course)}</strong><span>${escapeHtml(item.title)}</span>${done ? "<small>已完成</small>" : ""}</button></td>`;
@@ -1658,7 +1658,7 @@ if ("serviceWorker" in navigator) {
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=43", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js?v=44", { updateViaCache: "none" })
       .then(registration => registration.update())
       .catch(() => {});
   });
