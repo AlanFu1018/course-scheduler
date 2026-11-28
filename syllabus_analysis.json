@@ -1,0 +1,134 @@
+{
+  "schema_version": "1.5",
+  "analysis_id": "sa_fefc74711ee4",
+  "course_key": "115-1_CE3007-B",
+  "sources": [
+    {
+      "type": "ncu_syllabus",
+      "role": "syllabus",
+      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=52016&outline=52016&semester=1151",
+      "fetched_at": "2026-11-28T16:19:37+08:00",
+      "raw_text_hash": "sha256:4274c604e03b2bbce60d7ad32ec6cc6042880211e67d56ab15a77cb33c751e1a"
+    },
+    {
+      "type": "ncu_course_search",
+      "role": "course_schedule",
+      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=52016&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
+      "fetched_at": "2026-11-28T16:19:37+08:00",
+      "raw_text_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    }
+  ],
+  "model": "openai/gpt-oss-20b",
+  "created_at": "2026-11-28T16:19:37+08:00",
+  "start_date": null,
+  "end_date": null,
+  "course": {
+    "code": "CE3007-B",
+    "name": "計算機網路",
+    "name_en": "Computer Network",
+    "instructor": "王尉任",
+    "credits": 3,
+    "sessions": [],
+    "textbook": {
+      "title": "Computer Networking: A Top Down Approach 8th Edition",
+      "authors": [],
+      "edition": 8,
+      "chapters": []
+    }
+  },
+  "grading": [
+    {
+      "category": "midterm",
+      "weight": {
+        "value": 35,
+        "status": "confirmed",
+        "evidence": "midterm 35%, final exam 35%, HWs+mini-tests 30%"
+      }
+    },
+    {
+      "category": "final exam",
+      "weight": {
+        "value": 35,
+        "status": "confirmed",
+        "evidence": "midterm 35%, final exam 35%, HWs+mini-tests 30%"
+      }
+    },
+    {
+      "category": "HWs+mini-tests",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "midterm 35%, final exam 35%, HWs+mini-tests 30%"
+      }
+    }
+  ],
+  "assessments": [
+    {
+      "id": "midterm",
+      "type": "midterm",
+      "title": "midterm",
+      "weight": {
+        "value": 35,
+        "status": "confirmed",
+        "evidence": "\"midterm 35%\""
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date specified in syllabus."
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "Scope not specified in syllabus."
+      },
+      "note": null
+    },
+    {
+      "id": "final_exam",
+      "type": "final exam",
+      "title": "final exam",
+      "weight": {
+        "value": 35,
+        "status": "confirmed",
+        "evidence": "\"final exam 35%\""
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date specified in syllabus."
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "Scope not specified in syllabus."
+      },
+      "note": null
+    },
+    {
+      "id": "hw_mini",
+      "type": "HWs+mini-tests",
+      "title": "HWs+mini-tests",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "\"HWs+mini-tests 30%\""
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date specified in syllabus."
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "Scope not specified in syllabus."
+      },
+      "note": null
+    }
+  ],
+  "weekly_schedule": []
+}
