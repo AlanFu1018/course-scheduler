@@ -13,6 +13,7 @@ python extract.py --semester 1151 --serial-no 52016
 ```
 
 預設模型 `openai/gpt-oss-20b`；可用 GUI 欄位或 `--model` 覆寫。它支援 Groq 的嚴格 JSON schema 模式。若真實課綱的擷取品質不足，再比較 `openai/gpt-oss-120b`，而非先假設較大模型必需。
+若 Groq 回傳的 JSON 解析失敗、欄位缺漏或未通過資料驗證，程式會帶著錯誤原因自動重新生成，最多重試 3 次（初次加重試共 4 次）；仍失敗才報錯。網站資料只抓一次。API 連線與權限錯誤不屬於格式問題，不會重試。
 
 ## 資料限制
 

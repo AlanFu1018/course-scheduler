@@ -20,6 +20,7 @@ from pathlib import Path
 BASE = "https://cis.ncu.edu.tw"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 SCHEMA_VERSION = "2.0"
+MAX_REGENERATIONS = 3
 OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
 PERIOD_ORDER = "1234Z56789ABCD"
 # NCU official timetable: https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf
@@ -208,7 +209,8 @@ def model_schema() -> dict:
     }, "required": ["textbook", "grading", "assessments", "weekly_schedule"], "additionalProperties": False}
 
 
-def call_groq(fields: dict, search_fields: dict, api_key: str, model: str) -> dict:
+def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
+              feedback: str | None = None) -> dict:
     if not api_key:
         raise ValueError("請提供 Groq API key，或設定 GROQ_API_KEY 環境變數")
     system = ("Extract only facts grounded in the supplied NCU syllabus. Return JSON matching the schema. "
@@ -224,6 +226,9 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str) -> di
         {"role": "user", "content": json.dumps({"syllabus_fields": fields, "search_result": search_fields}, ensure_ascii=False)},
     ], "response_format": {"type": "json_schema", "json_schema": {
         "name": "syllabus_extraction", "strict": True, "schema": model_schema()}}}
+    if feedback:
+        body["messages"].append({"role": "user", "content":
+            f"The previous generation failed validation: {feedback}. Regenerate the complete JSON using only the supplied source."})
     try:
         from groq import Groq, APIStatusError
     except ImportError as exc:
@@ -234,10 +239,12 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str) -> di
         detail = str(exc)
         if exc.status_code == 403 and "1010" in detail:
             raise RuntimeError("Groq 的 Cloudflare 拒絕了此程式連線（403／1010）。已改用 Groq 官方 Python 套件；若仍出現此錯誤，請聯絡 Groq 支援並提供錯誤代碼。") from exc
+        if exc.status_code == 400 and "Generated JSON does not match" in detail:
+            raise ValueError("Groq 回傳的 JSON 不符合要求格式") from exc
         raise RuntimeError(f"Groq HTTP {exc.status_code}: {detail[:600]}") from exc
     content = response.choices[0].message.content
     if not content:
-        raise RuntimeError("Groq 沒有回傳 JSON 內容")
+        raise ValueError("Groq 沒有回傳 JSON 內容")
     return json.loads(content)
 
 
@@ -268,9 +275,14 @@ def validate(result: dict, fields: dict) -> None:
             raise ValueError(f"評量 {item['id']} 引用不存在的章節")
 
 
-def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MODEL) -> Path:
-    fields, search_fields, url, search_url = source_data(semester, serial_no)
-    extracted = call_groq(fields, search_fields, api_key, model)
+def build_result(semester: str, serial_no: str, model: str, fields: dict,
+                 search_fields: dict, url: str, search_url: str, extracted: dict) -> dict:
+    if not isinstance(extracted, dict):
+        raise ValueError("Groq 回傳的資料不是 JSON 物件")
+    expected = {"textbook": dict, "grading": list, "assessments": list, "weekly_schedule": list}
+    for name, kind in expected.items():
+        if not isinstance(extracted.get(name), kind):
+            raise ValueError(f"Groq 回傳欄位 {name} 缺失或類型錯誤")
     now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
     code = field_value(fields, "課號", "Course Code") or ""
     result = {
@@ -302,6 +314,22 @@ def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MO
     else:
         result["warnings"] = ["課程查詢結果沒有符合序號的上課時段；sessions 保持空白"]
     validate(result, fields)
+    return result
+
+
+def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MODEL) -> Path:
+    fields, search_fields, url, search_url = source_data(semester, serial_no)
+    feedback = None
+    for attempt in range(MAX_REGENERATIONS + 1):
+        try:
+            extracted = call_groq(fields, search_fields, api_key, model, feedback)
+            result = build_result(semester, serial_no, model, fields, search_fields,
+                                  url, search_url, extracted)
+            break
+        except (ValueError, TypeError, KeyError) as exc:
+            if attempt == MAX_REGENERATIONS:
+                raise RuntimeError(f"Groq 回傳格式經 {MAX_REGENERATIONS + 1} 次生成仍無法通過驗證：{exc}") from exc
+            feedback = str(exc)[:300]
     output = OUTPUT_DIR / f"{semester}_{serial_no}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
