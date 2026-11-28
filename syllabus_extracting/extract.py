@@ -19,6 +19,7 @@ from pathlib import Path
 
 BASE = "https://cis.ncu.edu.tw"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
+OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
 
 
 class TableParser(HTMLParser):
@@ -221,7 +222,7 @@ def validate(result: dict, fields: dict) -> None:
             raise ValueError(f"評量 {item['id']} 引用不存在的章節")
 
 
-def extract(semester: str, serial_no: str, output: Path, api_key: str, model: str = DEFAULT_MODEL) -> Path:
+def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MODEL) -> Path:
     fields, search_fields, url, search_url = source_data(semester, serial_no)
     extracted = call_groq(fields, search_fields, api_key, model)
     now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
@@ -249,16 +250,16 @@ def extract(semester: str, serial_no: str, output: Path, api_key: str, model: st
     if session:
         result["course"]["sessions_raw"] = session  # Class sections need a verified time mapping.
     validate(result, fields)
+    output = OUTPUT_DIR / f"{semester}_{serial_no}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出 syllabus_analysis.json")
+    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出至 syllabus_analyses/{學期}_{課程序號}.json")
     parser.add_argument("--semester", default="1151")
     parser.add_argument("--serial-no", default="52016")
-    parser.add_argument("--output", type=Path, default=Path("syllabus_analysis.json"))
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--gui", action="store_true")
     args = parser.parse_args()
@@ -267,7 +268,7 @@ def main() -> None:
         launch()
         return
     try:
-        print(extract(args.semester, args.serial_no, args.output, os.getenv("GROQ_API_KEY", ""), args.model))
+        print(extract(args.semester, args.serial_no, os.getenv("GROQ_API_KEY", ""), args.model))
     except Exception as exc:
         print(f"擷取失敗：{exc}", file=sys.stderr)
         raise SystemExit(1) from exc

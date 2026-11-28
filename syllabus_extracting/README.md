@@ -1,13 +1,13 @@
 # 中央大學課綱擷取（第一版）
 
-輸入學期及課程序號，讀取中央大學公開課綱與課程查詢結果，呼叫 Groq 擷取評分、評量及週次資料，輸出 `syllabus_analysis.json`。需要 Python 3.10+ 與 Groq 官方 Python 套件。
+輸入學期及課程序號，讀取中央大學公開課綱與課程查詢結果，呼叫 Groq 擷取評分、評量及週次資料，固定輸出至 `syllabus_analyses/{學期}_{課程序號}.json`（例如 `syllabus_analyses/1151_52016.json`）。需要 Python 3.10+ 與 Groq 官方 Python 套件。
 
 ## 使用
 
-先執行 `python -m pip install groq`。再於本目錄執行 `python gui.py` 開啟簡易介面，填入學期（如 `1151`）、序號（如 `52016`）、Groq API key 與輸出位置。API key 只留在程式記憶體，不寫入輸出檔案。也可設定 `GROQ_API_KEY` 環境變數後使用：
+先執行 `python -m pip install groq`。再於本目錄執行 `python gui.py` 開啟簡易介面，填入學期（如 `1151`）、序號（如 `52016`）與 Groq API key。API key 只留在程式記憶體，不寫入輸出檔案。也可設定 `GROQ_API_KEY` 環境變數後使用：
 
 ```powershell
-python extract.py --semester 1151 --serial-no 52016 --output syllabus_analysis.json
+python extract.py --semester 1151 --serial-no 52016
 ```
 
 預設模型 `openai/gpt-oss-20b`；可用 GUI 欄位或 `--model` 覆寫。它支援 Groq 的嚴格 JSON schema 模式。若真實課綱的擷取品質不足，再比較 `openai/gpt-oss-120b`，而非先假設較大模型必需。
