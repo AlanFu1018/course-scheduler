@@ -74,4 +74,7 @@
 
 輸出路徑不由 GUI 或 CLI 指定，固定為 `syllabus_extracting/syllabus_analyses/{semester}_{serial_no}.json`；同一學期與序號再次擷取會更新同名檔案。`sources` 清單記錄課綱頁與課程查詢頁各自的網址、用途、擷取時間與 hash。
 
+此分析檔的輸出 schema 已升至 `2.0`，因為 `source` → `sources` 是不相容的結構變更。`doc_template` 中的 1.5 範例與其他資料類型尚未同步升版；下游讀取前須檢查檔案本身的 `schema_version`。既有 1.5 檔案需重新擷取或明確遷移，不能只憑版本號推定結構。
+`doc_template/1_syllabus_analysis_v2.jsonc` 是對應的 2.0 範例；原 1.5 檔保留供比較。
+
 上課節次轉換使用[中央大學官方節次表](https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf)，由程式將 `Mon234/E6-A204` 轉成週一 `09:00–11:50`，相鄰節次合併、不相鄰拆段。搜尋列的 `52016<br>CE3007-B` 必須保留 `<br>` 為空白才能精確比對序號。若找不到時段或格式不明，保留 `sessions_raw`（若有）並輸出 `warnings`，不推測時間。

@@ -1,0 +1,133 @@
+// schema 2.0 相對於 1.5 的更動：
+//   - 單一 source 物件改為 sources 陣列；每個實際讀取的來源各有 type、role、url、
+//     fetched_at 與 raw_text_hash。課綱及課程查詢結果的變更可分別追蹤。
+//   - 課程查詢結果若提供原始上課節次，可保留在 course.sessions_raw；
+//     依官方節次表換算後填入 course.sessions。
+//   - 資料缺漏或時段無法解析時，允許 null／空陣列，並可用 warnings 說明。
+//   - 這是 syllabus_analysis 的版本；其餘四份 1.5 範例尚未同步升版。
+// ============================================================================
+// ============================================================================
+// 1. syllabus_analysis — AI 課綱分析（所有使用者共用，唯一的共用檔）
+//    對應模組圖：#1 資訊狀態標示 → #2 AI 分析資料 → 轉成 JSON
+//    SQLite（設計草案）：syllabus_analyses(analysis_id PK, model, created_at, data JSON)
+//
+//    - 產生後只讀，任何使用者的確認／編輯都不會改到這份
+//    - 每個來源各自有 hash；任一來源內容改變時可判斷是否需要更新分析（快取與更新通知尚未實作）
+//    - 這裡的欄位 status 只會是 confirmed 或 estimated（user_supplied 只出現在個人的 course）
+//
+// 通用規則（五份檔案共用）：
+//   - weekday 採 ISO 編碼：1 = 週一 … 7 = 週日
+//   - 日期 "YYYY-MM-DD"，時間 "HH:MM"（24 小時制），時間戳 ISO 8601 含時區
+//   - 「可推測欄位」統一包成 { value, status, evidence }
+//       status: "confirmed"     課綱明載
+//               "estimated"     AI 推測（evidence 必填）
+//               "user_supplied" 使用者補充（evidence 寫來源）
+// ============================================================================
+{
+  "schema_version": "2.0",
+  "analysis_id": "sa_0003",
+
+  // 同一門課在所有人之間共用的識別碼：{學年-學期}_{課號}
+  "course_key": "115-1_CE3005",
+
+  // 實際讀取的來源；每個來源分別保留網址、用途與內容 hash
+  "sources": [
+    {
+      "type": "ncu_syllabus",                      // ncu_syllabus | manual_upload
+      "role": "syllabus",
+      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=...&outline=...&semester=1151",
+      "fetched_at": "2026-11-09T23:00:00+08:00",
+      "raw_text_hash": "sha256:..."
+    },
+    {
+      "type": "ncu_course_search",
+      "role": "course_schedule",
+      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&keyword=...",
+      "fetched_at": "2026-11-09T23:00:00+08:00",
+      "raw_text_hash": "sha256:..."
+    }
+  ],
+  "model": "claude-opus-5-5",                     // 做分析的模型，方便日後追查品質
+  "created_at": "2026-11-09T23:00:00+08:00",
+
+  // 課程有效期間；週次以 start_date 所在週為第 1 週（start_date 應為週一）
+  "start_date": "2026-09-07",
+  "end_date": "2026-12-25",
+
+  "course": {
+    "code": "CE3005",
+    "name": "計算機網路",
+    "name_en": "Computer Networks",
+    "instructor": "王小明",
+    "credits": 3,
+
+    // 上課時段；前端選可用時間時這些格子標灰
+    "sessions": [
+      { "weekday": 4, "start_time": "10:00", "end_time": "11:50", "room": "E6-A203" }
+    ],
+    "sessions_raw": "Thu34/E6-A203",             // 可選；保留查詢頁原始節次供核對
+
+    "textbook": {
+      "title": "Computer Networking: A Top-Down Approach",
+      "authors": ["Kurose", "Ross"],
+      "edition": 8,
+      // 章節清單；assessments.scope、task.chapters、chapter_mastery 都只能引用這裡的 id
+      "chapters": [
+        { "id": "Ch1", "title": "Computer Networks and the Internet" },
+        { "id": "Ch2", "title": "Application Layer" },
+        { "id": "Ch3", "title": "Transport Layer" },
+        { "id": "Ch4", "title": "The Network Layer: Data Plane" },
+        { "id": "Ch5", "title": "The Network Layer: Control Plane" }
+      ]
+    }
+  },
+
+  // 配分類別；所有 category 的 weight.value 加總必須 = 100
+  "grading": [
+    { "category": "exam",     "weight": { "value": 60, "status": "confirmed", "evidence": "期中 30%、期末 30%" } },
+    { "category": "homework", "weight": { "value": 30, "status": "confirmed", "evidence": "作業 30%" } },
+    { "category": "quiz",     "weight": { "value": 10, "status": "confirmed", "evidence": "小考 10%" } }
+  ],
+
+  // 各項評量；type 可自由擴充：exam | homework | presentation | quiz | project | goal …
+  // id 在同一門課內唯一
+  "assessments": [
+    {
+      "id": "midterm",
+      "type": "exam",
+      "title": "期中考",
+      "weight": { "value": 30, "status": "confirmed", "evidence": "期中考 30%" },
+      // date.week 必須與 start_date 推算的週次一致（2026-11-05 為第 9 週週四）
+      "date":   { "value": "2026-11-05", "week": 9, "status": "estimated", "evidence": "課綱僅寫第 9 週，依週四上課日推算" },
+      // scope 內章節必須存在於 textbook.chapters
+      "scope":  { "value": ["Ch1", "Ch2", "Ch3"], "status": "confirmed", "evidence": "第 1–8 週進度" },
+      "note": null
+    },
+    {
+      "id": "final",
+      "type": "exam",
+      "title": "期末考",
+      "weight": { "value": 30, "status": "confirmed", "evidence": "期末考 30%" },
+      "date":   { "value": "2026-12-24", "week": 16, "status": "estimated", "evidence": "課綱寫第 16 週，依週四上課日推算" },
+      "scope":  { "value": ["Ch4", "Ch5"], "status": "estimated", "evidence": "期中後進度，課綱未明寫是否考前半" },
+      "note": null
+    },
+    {
+      "id": "hw-1",
+      "type": "homework",
+      "title": "作業一：Socket Programming",
+      // value = null → 由 grading 中 homework 的 30% 平均分給所有 homework
+      "weight": { "value": null, "status": "estimated", "evidence": "課綱未列單次作業占比，平均分配" },
+      "date":   { "value": "2026-10-15", "week": 6, "status": "estimated", "evidence": "課綱寫第 6 週繳交，取該週上課日" },
+      "scope":  { "value": ["Ch2"], "status": "confirmed", "evidence": "課綱：作業一 Application Layer" },
+      "note": null
+    }
+  ],
+
+  // 每週進度；拆任務時用來判斷「某章節何時教完、何時才能開始讀」
+  "weekly_schedule": [
+    { "week": 1, "date_range": ["2026-09-07", "2026-09-13"], "topics": ["Ch1 Introduction"], "chapters": ["Ch1"], "status": "confirmed" },
+    { "week": 2, "date_range": ["2026-09-14", "2026-09-20"], "topics": ["Ch1 Delay, Loss, Throughput"], "chapters": ["Ch1"], "status": "confirmed" }
+    // … 其餘週次
+  ]
+}

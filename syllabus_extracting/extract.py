@@ -19,6 +19,7 @@ from pathlib import Path
 
 BASE = "https://cis.ncu.edu.tw"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
+SCHEMA_VERSION = "2.0"
 OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
 PERIOD_ORDER = "1234Z56789ABCD"
 # NCU official timetable: https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf
@@ -273,7 +274,7 @@ def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MO
     now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
     code = field_value(fields, "課號", "Course Code") or ""
     result = {
-        "schema_version": "1.5", "analysis_id": "sa_" + hashlib.sha256((url + json.dumps(fields, ensure_ascii=False, sort_keys=True)).encode()).hexdigest()[:12],
+        "schema_version": SCHEMA_VERSION, "analysis_id": "sa_" + hashlib.sha256((url + json.dumps(fields, ensure_ascii=False, sort_keys=True)).encode()).hexdigest()[:12],
         "course_key": f"{semester[:3]}-{semester[3]}_{code}",
         "sources": [
             {"type": "ncu_syllabus", "role": "syllabus", "url": url, "fetched_at": now,

@@ -2,6 +2,8 @@
 
 輸入學期及課程序號，讀取中央大學公開課綱與課程查詢結果，呼叫 Groq 擷取評分、評量及週次資料，固定輸出至 `syllabus_analyses/{學期}_{課程序號}.json`（例如 `syllabus_analyses/1151_52016.json`）。需要 Python 3.10+ 與 Groq 官方 Python 套件。
 
+本模組輸出 `schema_version: "2.0"`。相對於 `doc_template/1_syllabus_analysis.jsonc` 的 1.5 範例，來源從單一 `source` 物件改為 `sources` 清單，屬不相容的結構變更。其他 `doc_template` 檔案尚未同步升版；下游程式應依分析檔自己的 `schema_version` 讀取。
+
 ## 使用
 
 先執行 `python -m pip install groq`。再於本目錄執行 `python gui.py` 開啟簡易介面，填入學期（如 `1151`）、序號（如 `52016`）與 Groq API key。API key 只留在程式記憶體，不寫入輸出檔案。也可設定 `GROQ_API_KEY` 環境變數後使用：
