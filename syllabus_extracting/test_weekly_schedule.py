@@ -36,6 +36,14 @@ class WeeklyScheduleTests(unittest.TestCase):
         self.assertTrue(all(row["status"] == "estimated" and row["date_range"] == []
                             and row["chapters"] == [] for row in rows))
 
+    def test_fullwidth_percent_in_grading(self):
+        fields = {**FIELDS, "評量配分比重": "作業３０％，期末考７０％"}
+        data = model_result()
+        data["grading"] = [
+            {"category": name, "weight": {"value": value, "status": "confirmed", "evidence": ""}}
+            for name, value in (("作業", 30), ("期末考", 70))]
+        self.assertEqual(build(fields, data)["grading"][0]["weight"]["value"], 30)
+
     def test_partial_and_complete_explicit_schedule(self):
         partial = {**FIELDS, "授課進度": "第 2 週：應用層；第 5 週：傳輸層"}
         build(partial, model_result(16, {2, 5}))

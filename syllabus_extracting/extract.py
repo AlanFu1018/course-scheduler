@@ -13,6 +13,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -22,6 +24,12 @@ DEFAULT_MODEL = "openai/gpt-oss-20b"
 SCHEMA_VERSION = "2.0"
 MAX_REGENERATIONS = 3
 OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
+
+
+def analysis_filename(course_key: str) -> str:
+    if not course_key:
+        raise ValueError("課程識別不可為空")
+    return quote(course_key, safe="") + ".json"
 PERIOD_ORDER = "1234Z56789ABCD"
 # NCU official timetable: https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf
 PERIOD_TIMES = {
@@ -248,7 +256,7 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
               "Do not invent textbook chapter IDs; use chapters:[] when no matching chapter list exists. "
               "If Teaching Weeks is missing, include only explicitly numbered weeks, with no invented total. "
               "Only include assessments explicitly mentioned. Output JSON only.")
-    body = {"model": model, "temperature": 0, "messages": [
+    body = {"model": model, "temperature": 0, "max_completion_tokens": 8192, "messages": [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps({"syllabus_fields": fields, "search_result": search_fields}, ensure_ascii=False)},
     ], "response_format": {"type": "json_schema", "json_schema": {
@@ -266,8 +274,8 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
         detail = str(exc)
         if exc.status_code == 403 and "1010" in detail:
             raise RuntimeError("Groq 的 Cloudflare 拒絕了此程式連線（403／1010）。已改用 Groq 官方 Python 套件；若仍出現此錯誤，請聯絡 Groq 支援並提供錯誤代碼。") from exc
-        if exc.status_code == 400 and "Generated JSON does not match" in detail:
-            raise ValueError("Groq 回傳的 JSON 不符合要求格式") from exc
+        if exc.status_code == 400 and ("json_validate_failed" in detail or "Generated JSON does not match" in detail):
+            raise ValueError("Groq 的 JSON 未完成或不符合格式；正在重新生成") from exc
         raise RuntimeError(f"Groq HTTP {exc.status_code}: {detail[:600]}") from exc
     content = response.choices[0].message.content
     if not content:
@@ -286,6 +294,7 @@ def validate(result: dict, fields: dict) -> None:
     if all(v is not None for v in values) and grading and abs(sum(values) - 100) > 0.01:
         raise ValueError("已知評分比例加總不等於 100")
     grading_text = field_value(fields, "評量配分比重", "Grading") or ""
+    normalized_grading = unicodedata.normalize("NFKC", grading_text)
     for item in grading:
         weight = item["weight"]
         if weight["value"] is not None and weight["status"] == "confirmed":
@@ -293,8 +302,8 @@ def validate(result: dict, fields: dict) -> None:
             # only when that percentage appears in the source, then store the
             # exact source sentence as the auditable evidence.
             number = f"{weight['value']:g}"
-            if not re.search(rf"(?<![\d.]){re.escape(number)}(?:\.0+)?\s*%", grading_text):
-                raise ValueError(f"評分 {item['category']} 的 {number}% 不在課綱評分原文中")
+            if not re.search(rf"(?<![\d.]){re.escape(number)}(?:\.0+)?\s*(?:%|percent\b)", normalized_grading, re.IGNORECASE):
+                raise ValueError(f"評分 {item['category']} 的 {number}% 不在課綱評分原文中；擷取到的原文：{grading_text[:180]!r}")
             weight["evidence"] = grading_text
     chapter_ids = {c["id"] for c in result["course"]["textbook"]["chapters"]}
     for item in result["assessments"]:
@@ -378,14 +387,14 @@ def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MO
             if attempt == MAX_REGENERATIONS:
                 raise RuntimeError(f"Groq 回傳格式經 {MAX_REGENERATIONS + 1} 次生成仍無法通過驗證：{exc}") from exc
             feedback = str(exc)[:300]
-    output = OUTPUT_DIR / f"{semester}_{serial_no}.json"
+    output = OUTPUT_DIR / analysis_filename(result["course_key"])
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出至 syllabus_analyses/{學期}_{課程序號}.json")
+    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出至 syllabus_analyses/{course_key}.json")
     parser.add_argument("--semester", default="1151")
     parser.add_argument("--serial-no", default="52016")
     parser.add_argument("--model", default=DEFAULT_MODEL)

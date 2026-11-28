@@ -7,12 +7,13 @@
 //      → 這筆紀錄存在，就代表本人已審核，不需要另外的 review 欄位
 //    - 之後本人可直接編輯；改過的欄位 status 改成 user_supplied
 //    - 自學課程：沒有 analysis，由使用者直接建立（source.type = user_created、analysis_id = null）
-//    - 結構與 1_syllabus_analysis 相同，多了 user_id，少了 model
+//    - 目前實作採 schema 2.0；source 保留 analysis_id 與分析時的 sources 清單
+//    - 結構與 2.0 syllabus_analysis 相近，多了 user_id，少了 model
 //    - 修改評量日期／範圍 → 觸發重排（4_schedule 的 trigger = course_update）
 //    - 通用規則（weekday、日期格式、{ value, status, evidence }）見 1_syllabus_analysis 檔頭
 // ============================================================================
 {
-  "schema_version": "1.5",
+  "schema_version": "2.0",
 
   // PK = (user_id, course_key)；審核與編輯都只影響本人這份
   "user_id": "u_0001",
@@ -21,11 +22,11 @@
   "course_key": "115-1_CE3005",
 
   "source": {
-    "type": "ncu_syllabus",                       // ncu_syllabus | manual_upload | user_created
-    "analysis_id": "sa_0003",                     // 從哪份共用分析複製；user_created 為 null
-    "syllabus_url": "https://cis.ncu.edu.tw/...",
-    // 複製當時的課綱 hash；與該 course_key 最新 analysis 的 hash 不同 → 前端提示「課綱已更新，要比對嗎？」
-    "raw_text_hash": "sha256:..."
+    "analysis_id": "sa_0003",
+    "sources": [
+      { "type": "ncu_syllabus", "role": "syllabus", "url": "https://cis.ncu.edu.tw/...", "fetched_at": "2026-11-28T17:15:24+08:00", "raw_text_hash": "sha256:..." },
+      { "type": "ncu_course_search", "role": "course_schedule", "url": "https://cis.ncu.edu.tw/...", "fetched_at": "2026-11-28T17:15:24+08:00", "raw_text_hash": "sha256:..." }
+    ]
   },
 
   // 課程有效期間；使用者資料不以學期切分，靠這個範圍判斷「目前有效」
