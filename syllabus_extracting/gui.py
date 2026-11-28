@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 from extract import DEFAULT_MODEL, extract
@@ -52,8 +54,12 @@ def launch() -> None:
 
     def finish_success(path: str) -> None:
         button.configure(state="normal")
-        status.set(f"已儲存：{path}")
-        messagebox.showinfo("完成", f"已產生\n{path}")
+        warnings = json.loads(Path(path).read_text(encoding="utf-8")).get("warnings", [])
+        status.set(f"已儲存：{path}" + ("（上課時段需檢查）" if warnings else ""))
+        message = f"已產生\n{path}"
+        if warnings:
+            message += "\n\n提醒：" + "；".join(warnings)
+        messagebox.showinfo("完成", message)
 
     button = ttk.Button(root, text="擷取並產生 JSON", command=run)
     button.grid(row=4, column=1, sticky="e", padx=8, pady=12)

@@ -73,3 +73,5 @@
 `syllabus_extracting/extract.py` 提供命令列擷取，`gui.py` 提供 Tkinter 簡易介面。預設 Groq `openai/gpt-oss-20b`，使用嚴格 JSON schema 回應；`README.md` 有執行方式。程式以規則填入課程識別與來源資訊，Groq 整理教材、評分、評量及週次，再做基本驗證並輸出 JSON。這是原型：已通過語法與本地 HTML parser 檢查，尚未在本機完成對 NCU 或 Groq 的端到端測試，亦未針對真實課綱評估模型準確度。
 
 輸出路徑不由 GUI 或 CLI 指定，固定為 `syllabus_extracting/syllabus_analyses/{semester}_{serial_no}.json`；同一學期與序號再次擷取會更新同名檔案。`sources` 清單記錄課綱頁與課程查詢頁各自的網址、用途、擷取時間與 hash。
+
+上課節次轉換使用[中央大學官方節次表](https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf)，由程式將 `Mon234/E6-A204` 轉成週一 `09:00–11:50`，相鄰節次合併、不相鄰拆段。搜尋列的 `52016<br>CE3007-B` 必須保留 `<br>` 為空白才能精確比對序號。若找不到時段或格式不明，保留 `sessions_raw`（若有）並輸出 `warnings`，不推測時間。

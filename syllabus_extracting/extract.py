@@ -20,6 +20,18 @@ from pathlib import Path
 BASE = "https://cis.ncu.edu.tw"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
+PERIOD_ORDER = "1234Z56789ABCD"
+# NCU official timetable: https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf
+PERIOD_TIMES = {
+    "1": ("08:00", "08:50"), "2": ("09:00", "09:50"),
+    "3": ("10:00", "10:50"), "4": ("11:00", "11:50"),
+    "Z": ("12:00", "12:50"), "5": ("13:00", "13:50"),
+    "6": ("14:00", "14:50"), "7": ("15:00", "15:50"),
+    "8": ("16:00", "16:50"), "9": ("17:00", "17:50"),
+    "A": ("18:00", "18:50"), "B": ("19:00", "19:50"),
+    "C": ("20:00", "20:50"), "D": ("21:00", "21:50"),
+}
+WEEKDAYS = {"Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6, "Sun": 7}
 
 
 class TableParser(HTMLParser):
@@ -33,7 +45,9 @@ class TableParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = dict(attrs)
-        if tag == "tr":
+        if tag == "br" and self.cell is not None:
+            self.cell["text"] += " "
+        elif tag == "tr":
             self.row = []
         elif tag in {"td", "th"} and self.row is not None:
             self.cell = {"text": ""}
@@ -109,7 +123,7 @@ def source_data(semester: str, serial_no: str) -> tuple[dict, dict, str, str]:
         "week": "", "day": "", "crs_lang_no": "0", "query": "查詢",
     })
     search_page = parse_page(fetch(search_url, opener))
-    matching = [row for row in search_page.rows if row and re.search(rf"\b{re.escape(serial_no)}\b", row[0]["text"])]
+    matching = [row for row in search_page.rows if row and row[0]["text"].split()[:1] == [serial_no]]
     search_fields: dict[str, str] = {}
     if matching:
         row = matching[0]
@@ -124,6 +138,37 @@ def source_data(semester: str, serial_no: str) -> tuple[dict, dict, str, str]:
 
 def field_value(fields: dict[str, str], chinese: str, english: str) -> str | None:
     return fields.get(chinese) or fields.get(english)
+
+
+def parse_sessions(raw: str) -> list[dict]:
+    """Convert NCU period codes to occupied time ranges, including short breaks."""
+    sessions = []
+    for part in re.split(r"\s*[,;；，]\s*", raw.strip()):
+        part = re.sub(r"\s*\([^)]*\)\s*$", "", part).strip()
+        match = re.fullmatch(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)([1-9ZA-D]+)/([^/]+)", part, re.IGNORECASE)
+        if not match:
+            raise ValueError(f"無法辨識上課時段：{part}")
+        day, codes, room = match.groups()
+        codes = codes.upper()
+        if len(set(codes)) != len(codes) or any(code not in PERIOD_ORDER for code in codes):
+            raise ValueError(f"上課節次重複或未知：{codes}")
+        indexes = [PERIOD_ORDER.index(code) for code in codes]
+        if indexes != sorted(indexes):
+            raise ValueError(f"上課節次順序錯誤：{codes}")
+        room = room.strip()
+        if not room:
+            raise ValueError("缺少上課教室")
+        groups = [[codes[0]]]
+        for previous, code in zip(codes, codes[1:]):
+            if PERIOD_ORDER.index(code) == PERIOD_ORDER.index(previous) + 1:
+                groups[-1].append(code)
+            else:
+                groups.append([code])
+        for group in groups:
+            sessions.append({"weekday": WEEKDAYS[day.title()],
+                             "start_time": PERIOD_TIMES[group[0]][0],
+                             "end_time": PERIOD_TIMES[group[-1]][1], "room": room})
+    return sessions
 
 
 def model_schema() -> dict:
@@ -248,7 +293,13 @@ def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MO
     }
     session = search_fields.get("session", "")
     if session:
-        result["course"]["sessions_raw"] = session  # Class sections need a verified time mapping.
+        result["course"]["sessions_raw"] = session
+        try:
+            result["course"]["sessions"] = parse_sessions(session)
+        except ValueError as exc:
+            result["warnings"] = [str(exc)]
+    else:
+        result["warnings"] = ["課程查詢結果沒有符合序號的上課時段；sessions 保持空白"]
     validate(result, fields)
     output = OUTPUT_DIR / f"{semester}_{serial_no}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +319,10 @@ def main() -> None:
         launch()
         return
     try:
-        print(extract(args.semester, args.serial_no, os.getenv("GROQ_API_KEY", ""), args.model))
+        output = extract(args.semester, args.serial_no, os.getenv("GROQ_API_KEY", ""), args.model)
+        print(output)
+        for warning in json.loads(output.read_text(encoding="utf-8")).get("warnings", []):
+            print(f"提醒：{warning}", file=sys.stderr)
     except Exception as exc:
         print(f"擷取失敗：{exc}", file=sys.stderr)
         raise SystemExit(1) from exc

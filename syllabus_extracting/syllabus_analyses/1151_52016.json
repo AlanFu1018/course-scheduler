@@ -7,19 +7,19 @@
       "type": "ncu_syllabus",
       "role": "syllabus",
       "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=52016&outline=52016&semester=1151",
-      "fetched_at": "2026-11-28T16:41:14+08:00",
+      "fetched_at": "2026-11-28T16:54:27+08:00",
       "raw_text_hash": "sha256:4274c604e03b2bbce60d7ad32ec6cc6042880211e67d56ab15a77cb33c751e1a"
     },
     {
       "type": "ncu_course_search",
       "role": "course_schedule",
       "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=52016&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
-      "fetched_at": "2026-11-28T16:41:14+08:00",
-      "raw_text_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      "fetched_at": "2026-11-28T16:54:27+08:00",
+      "raw_text_hash": "sha256:e82738be184f46576c2688020433fe978b76208f4e78ba2f4c547a5ab1ad15b4"
     }
   ],
   "model": "openai/gpt-oss-20b",
-  "created_at": "2026-11-28T16:41:14+08:00",
+  "created_at": "2026-11-28T16:54:27+08:00",
   "start_date": null,
   "end_date": null,
   "course": {
@@ -28,13 +28,21 @@
     "name_en": "Computer Network",
     "instructor": "王尉任",
     "credits": 3,
-    "sessions": [],
+    "sessions": [
+      {
+        "weekday": 1,
+        "start_time": "09:00",
+        "end_time": "11:50",
+        "room": "E6-A204"
+      }
+    ],
     "textbook": {
-      "title": "Computer Networking: A Top Down Approach 8th Edition",
+      "title": "Computer Networking: A Top Down Approach",
       "authors": [],
       "edition": 8,
       "chapters": []
-    }
+    },
+    "sessions_raw": "Mon234/E6-A204"
   },
   "grading": [
     {
@@ -65,67 +73,67 @@
   "assessments": [
     {
       "id": "midterm",
-      "type": "midterm",
-      "title": "midterm",
+      "type": "Exam",
+      "title": "Midterm Exam",
       "weight": {
         "value": 35,
         "status": "confirmed",
-        "evidence": "\"midterm 35%\""
+        "evidence": "評量配分比重: midterm 35%"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No date specified in syllabus."
+        "evidence": "No dates specified in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "Scope not specified in syllabus."
+        "evidence": "No scope specified in syllabus"
       },
       "note": null
     },
     {
       "id": "final_exam",
-      "type": "final exam",
-      "title": "final exam",
+      "type": "Exam",
+      "title": "Final Exam",
       "weight": {
         "value": 35,
         "status": "confirmed",
-        "evidence": "\"final exam 35%\""
+        "evidence": "評量配分比重: final exam 35%"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No date specified in syllabus."
+        "evidence": "No dates specified in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "Scope not specified in syllabus."
+        "evidence": "No scope specified in syllabus"
       },
       "note": null
     },
     {
       "id": "hw_mini",
-      "type": "HWs+mini-tests",
-      "title": "HWs+mini-tests",
+      "type": "Homework",
+      "title": "Homework and Mini-Tests",
       "weight": {
         "value": 30,
         "status": "confirmed",
-        "evidence": "\"HWs+mini-tests 30%\""
+        "evidence": "評量配分比重: HWs+mini-tests 30%"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No date specified in syllabus."
+        "evidence": "No dates specified in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "Scope not specified in syllabus."
+        "evidence": "No scope specified in syllabus"
       },
       "note": null
     }
