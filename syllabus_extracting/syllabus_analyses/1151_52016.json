@@ -7,19 +7,19 @@
       "type": "ncu_syllabus",
       "role": "syllabus",
       "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=52016&outline=52016&semester=1151",
-      "fetched_at": "2026-11-28T17:08:04+08:00",
+      "fetched_at": "2026-11-28T17:15:24+08:00",
       "raw_text_hash": "sha256:4274c604e03b2bbce60d7ad32ec6cc6042880211e67d56ab15a77cb33c751e1a"
     },
     {
       "type": "ncu_course_search",
       "role": "course_schedule",
       "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=52016&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
-      "fetched_at": "2026-11-28T17:08:04+08:00",
+      "fetched_at": "2026-11-28T17:15:24+08:00",
       "raw_text_hash": "sha256:e82738be184f46576c2688020433fe978b76208f4e78ba2f4c547a5ab1ad15b4"
     }
   ],
   "model": "openai/gpt-oss-20b",
-  "created_at": "2026-11-28T17:08:04+08:00",
+  "created_at": "2026-11-28T17:15:24+08:00",
   "start_date": null,
   "end_date": null,
   "course": {
@@ -37,7 +37,7 @@
       }
     ],
     "textbook": {
-      "title": "Computer Networking: A Top Down Approach",
+      "title": "Computer Networking: A Top Down Approach 8th Edition",
       "authors": [],
       "edition": 8,
       "chapters": []
@@ -73,7 +73,7 @@
   "assessments": [
     {
       "id": "midterm",
-      "type": "Exam",
+      "type": "exam",
       "title": "Midterm Exam",
       "weight": {
         "value": 35,
@@ -84,18 +84,18 @@
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No specific dates provided in syllabus."
+        "evidence": "No date provided in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No scope specified."
+        "evidence": "No scope provided"
       },
       "note": null
     },
     {
       "id": "final_exam",
-      "type": "Exam",
+      "type": "exam",
       "title": "Final Exam",
       "weight": {
         "value": 35,
@@ -106,18 +106,18 @@
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No specific dates provided in syllabus."
+        "evidence": "No date provided in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No scope specified."
+        "evidence": "No scope provided"
       },
       "note": null
     },
     {
-      "id": "hw_mini",
-      "type": "Assignment",
+      "id": "hw_mini_tests",
+      "type": "assignment",
       "title": "Homework and Mini-Tests",
       "weight": {
         "value": 30,
@@ -128,15 +128,160 @@
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No specific dates provided in syllabus."
+        "evidence": "No date provided in syllabus"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No scope specified."
+        "evidence": "No scope provided"
       },
       "note": null
     }
   ],
-  "weekly_schedule": []
+  "weekly_schedule": [
+    {
+      "week": 1,
+      "date_range": [],
+      "topics": [
+        "Introduction to the Internet and OSI model"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 2,
+      "date_range": [],
+      "topics": [
+        "Application layer protocols: HTTP and HTTPS"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 3,
+      "date_range": [],
+      "topics": [
+        "Email protocols: SMTP, POP3, IMAP"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 4,
+      "date_range": [],
+      "topics": [
+        "Domain Name System (DNS)"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 5,
+      "date_range": [],
+      "topics": [
+        "Transport layer: UDP"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 6,
+      "date_range": [],
+      "topics": [
+        "Transport layer: TCP and reliable data transfer"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 7,
+      "date_range": [],
+      "topics": [
+        "Congestion control mechanisms"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 8,
+      "date_range": [],
+      "topics": [
+        "Network layer: IP and routing fundamentals"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 9,
+      "date_range": [],
+      "topics": [
+        "Routing algorithms and protocols"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 10,
+      "date_range": [],
+      "topics": [
+        "Link layer: Ethernet and switching"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 11,
+      "date_range": [],
+      "topics": [
+        "Switches, VLANs, and network segmentation"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 12,
+      "date_range": [],
+      "topics": [
+        "Wireless networks and mobile access"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 13,
+      "date_range": [],
+      "topics": [
+        "Mobile networks and cellular technologies"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 14,
+      "date_range": [],
+      "topics": [
+        "Network security basics and threat models"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 15,
+      "date_range": [],
+      "topics": [
+        "Security mechanisms: encryption, authentication, and firewalls"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 16,
+      "date_range": [],
+      "topics": [
+        "Course review and final exam preparation"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    }
+  ]
 }

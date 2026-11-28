@@ -142,6 +142,28 @@ def field_value(fields: dict[str, str], chinese: str, english: str) -> str | Non
     return fields.get(chinese) or fields.get(english)
 
 
+def teaching_weeks(fields: dict[str, str]) -> int | None:
+    raw = field_value(fields, "授課週數", "Teaching Weeks")
+    if not raw:
+        return None
+    match = re.search(r"\d+", raw)
+    if not match:
+        return None
+    count = int(match.group())
+    if count < 1:
+        raise ValueError("授課週數必須大於 0")
+    return count
+
+
+def explicitly_scheduled_weeks(fields: dict[str, str]) -> set[int]:
+    # A total such as "授課週數: 16" is not evidence for week 16 content.
+    content = " ".join(value for key, value in fields.items()
+                       if key not in {"授課週數", "Teaching Weeks"})
+    patterns = (r"第\s*(\d+)\s*週", r"\bweek\s*(\d+)\b", r"\bW(\d+)\b")
+    return {int(match) for pattern in patterns
+            for match in re.findall(pattern, content, flags=re.IGNORECASE)}
+
+
 def parse_sessions(raw: str) -> list[dict]:
     """Convert NCU period codes to occupied time ranges, including short breaks."""
     sessions = []
@@ -213,13 +235,18 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
               feedback: str | None = None) -> dict:
     if not api_key:
         raise ValueError("請提供 Groq API key，或設定 GROQ_API_KEY 環境變數")
-    system = ("Extract only facts grounded in the supplied NCU syllabus. Return JSON matching the schema. "
-              "Never invent dates, weeks, chapters, weights, or textbook authors. For missing values use null or []. "
+    system = ("Extract syllabus facts and create a clearly estimated weekly study-planning outline. Return JSON matching the schema. "
+              "Never invent calendar dates, grading weights, textbook chapters, assessments, or textbook authors. For missing values use null or []. "
               "For date objects with no date, use value:null, week:null, status:estimated, evidence explaining absence. "
               "Keep combined grading categories combined (e.g. HWs+mini-tests 30%); do not split them. "
               "Confirmed requires an exact source quote in evidence. Estimated requires a clear derivation. "
               "Do not treat general teaching topics as textbook chapter IDs. "
-              "Only include weekly schedule entries if the syllabus explicitly specifies week-by-week content. "
+              "If Teaching Weeks states N, return exactly N weekly_schedule entries numbered 1 through N. "
+              "Use stated teaching goals/content to distribute plausible topics in teaching order across those weeks. "
+              "Mark a week confirmed only if the syllabus explicitly assigns its topic to that numbered week; mark every inferred week estimated. "
+              "When no confirmed calendar dates are supplied, set every date_range to []. "
+              "Do not invent textbook chapter IDs; use chapters:[] when no matching chapter list exists. "
+              "If Teaching Weeks is missing, include only explicitly numbered weeks, with no invented total. "
               "Only include assessments explicitly mentioned. Output JSON only.")
     body = {"model": model, "temperature": 0, "messages": [
         {"role": "system", "content": system},
@@ -273,6 +300,27 @@ def validate(result: dict, fields: dict) -> None:
     for item in result["assessments"]:
         if not set(item["scope"]["value"]) <= chapter_ids:
             raise ValueError(f"評量 {item['id']} 引用不存在的章節")
+    weeks = result["weekly_schedule"]
+    total = teaching_weeks(fields)
+    numbers = [item["week"] for item in weeks]
+    if len(set(numbers)) != len(numbers):
+        raise ValueError("weekly_schedule 的週次重複")
+    if total is not None and numbers != list(range(1, total + 1)):
+        raise ValueError(f"weekly_schedule 必須依序包含第 1 至 {total} 週")
+    explicit = explicitly_scheduled_weeks(fields)
+    for item in weeks:
+        if item["week"] < 1 or (total is not None and item["week"] > total):
+            raise ValueError(f"週次超出授課範圍：{item['week']}")
+        if item["status"] == "confirmed" and item["week"] not in explicit:
+            raise ValueError(f"第 {item['week']} 週未在課綱明載，不可標為 confirmed")
+        if item["week"] in explicit and item["status"] != "confirmed":
+            raise ValueError(f"第 {item['week']} 週已在課綱明載，應標為 confirmed")
+        if total is None and item["week"] not in explicit:
+            raise ValueError(f"未提供授課週數，不可推估第 {item['week']} 週")
+        if result["start_date"] is None and item["date_range"]:
+            raise ValueError(f"第 {item['week']} 週沒有可靠日期，date_range 應為空陣列")
+        if not set(item["chapters"]) <= chapter_ids:
+            raise ValueError(f"第 {item['week']} 週引用不存在的教材章節")
 
 
 def build_result(semester: str, serial_no: str, model: str, fields: dict,
