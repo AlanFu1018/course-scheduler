@@ -1,58 +1,59 @@
 {
   "schema_version": "2.0",
-  "analysis_id": "sa_b60e066d8f5d",
-  "course_key": "115-1_IM7071-*",
-  "sources": [
-    {
-      "type": "ncu_syllabus",
-      "role": "syllabus",
-      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=43040&outline=43040&semester=1151",
-      "fetched_at": "2026-11-28T18:36:06+08:00",
-      "raw_text_hash": "sha256:4dbcd1023b1b3a27d35946607b13a23e9fadf371350e5b7199f897506549a88c"
-    },
-    {
-      "type": "ncu_course_search",
-      "role": "course_schedule",
-      "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=43040&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
-      "fetched_at": "2026-11-28T18:36:06+08:00",
-      "raw_text_hash": "sha256:62c7754cc18f9554fb906cce3bdab30f646d5f7e81ba4bdfc2e0eacf7b2ff3ab"
-    }
-  ],
-  "model": "openai/gpt-oss-20b",
-  "created_at": "2026-11-28T18:36:06+08:00",
+  "user_id": "demo_user",
+  "course_key": "115-1_IM6055-*",
+  "source": {
+    "analysis_id": "sa_54a997a6285e",
+    "sources": [
+      {
+        "type": "ncu_syllabus",
+        "role": "syllabus",
+        "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=43036&outline=43036&semester=1151",
+        "fetched_at": "2026-11-28T18:50:23+08:00",
+        "raw_text_hash": "sha256:13f9e89941b761822250182730fc51f089ec584741658a64c98842f7e5334d13"
+      },
+      {
+        "type": "ncu_course_search",
+        "role": "course_schedule",
+        "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=43036&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
+        "fetched_at": "2026-11-28T18:50:23+08:00",
+        "raw_text_hash": "sha256:b8e0a6a9082665601dfa9d5b979b768ba3bee52f602550566d576ed47c353204"
+      }
+    ]
+  },
   "start_date": null,
   "end_date": null,
   "course": {
-    "code": "IM7071-*",
-    "name": "企業電腦網路",
-    "name_en": "Business Computer Networks",
+    "code": "IM6055-*",
+    "name": "電腦網路安全",
+    "name_en": "Computer Network Security",
     "instructor": "陳奕明",
     "credits": 3,
     "sessions": [
       {
-        "weekday": 2,
+        "weekday": 5,
         "start_time": "14:00",
         "end_time": "16:50",
-        "room": "I1-404"
+        "room": "I1-107"
       }
     ],
     "textbook": {
-      "title": "Business Data Networks and Security",
+      "title": "Fundamentals of Network Security",
       "authors": [
-        "Ray Panko"
+        "E. Maiwald"
       ],
-      "edition": 10,
+      "edition": null,
       "chapters": []
     },
-    "sessions_raw": "Tue678/I1-404"
+    "sessions_raw": "Fri678/I1-107"
   },
   "grading": [
     {
       "category": "作業",
       "weight": {
-        "value": 25,
+        "value": 30,
         "status": "confirmed",
-        "evidence": "“作業: 25 ％ 期中考： 30 ％ 期末考： 30 ％ 上課表現： 15％“"
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
       }
     },
     {
@@ -60,7 +61,7 @@
       "weight": {
         "value": 30,
         "status": "confirmed",
-        "evidence": "“作業: 25 ％ 期中考： 30 ％ 期末考： 30 ％ 上課表現： 15％“"
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
       }
     },
     {
@@ -68,15 +69,15 @@
       "weight": {
         "value": 30,
         "status": "confirmed",
-        "evidence": "“作業: 25 ％ 期中考： 30 ％ 期末考： 30 ％ 上課表現： 15％“"
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
       }
     },
     {
       "category": "上課表現",
       "weight": {
-        "value": 15,
+        "value": 10,
         "status": "confirmed",
-        "evidence": "“作業: 25 ％ 期中考： 30 ％ 期末考： 30 ％ 上課表現： 15％“"
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
       }
     }
   ],
@@ -86,20 +87,20 @@
       "type": "作業",
       "title": "作業",
       "weight": {
-        "value": 25,
+        "value": 30,
         "status": "confirmed",
-        "evidence": "\"作業: 25％ 期中考：30％ 期末考：30％ 上課表現：15％\""
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No explicit dates provided in syllabus."
+        "evidence": "No date provided"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No explicit scope provided in syllabus."
+        "evidence": "No scope provided"
       },
       "note": null
     },
@@ -110,18 +111,18 @@
       "weight": {
         "value": 30,
         "status": "confirmed",
-        "evidence": "\"作業: 25％ 期中考：30％ 期末考：30％ 上課表現：15％\""
+        "evidence": "期中考： 30％"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No explicit dates provided in syllabus."
+        "evidence": "No date provided"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No explicit scope provided in syllabus."
+        "evidence": "No scope provided"
       },
       "note": null
     },
@@ -132,18 +133,18 @@
       "weight": {
         "value": 30,
         "status": "confirmed",
-        "evidence": "\"作業: 25％ 期中考：30％ 期末考：30％ 上課表現：15％\""
+        "evidence": "期末考:： 30％"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No explicit dates provided in syllabus."
+        "evidence": "No date provided"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No explicit scope provided in syllabus."
+        "evidence": "No scope provided"
       },
       "note": null
     },
@@ -152,20 +153,20 @@
       "type": "上課表現",
       "title": "上課表現",
       "weight": {
-        "value": 15,
+        "value": 10,
         "status": "confirmed",
-        "evidence": "\"作業: 25％ 期中考：30％ 期末考：30％ 上課表現：15％\""
+        "evidence": "上課表現： 10％"
       },
       "date": {
         "value": null,
         "week": null,
         "status": "estimated",
-        "evidence": "No explicit dates provided in syllabus."
+        "evidence": "No date provided"
       },
       "scope": {
         "value": [],
         "status": "estimated",
-        "evidence": "No explicit scope provided in syllabus."
+        "evidence": "No scope provided"
       },
       "note": null
     }
@@ -175,7 +176,7 @@
       "week": 1,
       "date_range": [],
       "topics": [
-        "Networking: Welcome To The Cloud"
+        "1.What Is Information Security? （1）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -184,7 +185,7 @@
       "week": 2,
       "date_range": [],
       "topics": [
-        "Network Standards"
+        "1.What Is Information Security? （2）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -193,7 +194,7 @@
       "week": 3,
       "date_range": [],
       "topics": [
-        "Network Security"
+        "2.Types of Attacks （1）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -202,7 +203,7 @@
       "week": 4,
       "date_range": [],
       "topics": [
-        "Network and Security Management"
+        "2.Types of Attacks （2）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -211,7 +212,7 @@
       "week": 5,
       "date_range": [],
       "topics": [
-        "Ethernet(802.3)Switched Lans"
+        "3.Hacker Techniques （1）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -220,7 +221,7 @@
       "week": 6,
       "date_range": [],
       "topics": [
-        "Wireless Lans (I)"
+        "3.Hacker Techniques （2）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -229,7 +230,7 @@
       "week": 7,
       "date_range": [],
       "topics": [
-        "Wireless Lans (II)"
+        "4.Information Security Services （1）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -238,7 +239,7 @@
       "week": 8,
       "date_range": [],
       "topics": [
-        "TCP/IP Internetworking (I)"
+        "4.Information Security Services （2）"
       ],
       "chapters": [],
       "status": "estimated"
@@ -247,7 +248,7 @@
       "week": 9,
       "date_range": [],
       "topics": [
-        "TCP/IP Internetworking (II)"
+        "5.Security Policy"
       ],
       "chapters": [],
       "status": "estimated"
@@ -256,7 +257,7 @@
       "week": 10,
       "date_range": [],
       "topics": [
-        "Carrier Wide Area Networks (Wans)"
+        "6.Managing Risk"
       ],
       "chapters": [],
       "status": "estimated"
@@ -265,7 +266,7 @@
       "week": 11,
       "date_range": [],
       "topics": [
-        "Networked Applications"
+        "7.Information Security Process"
       ],
       "chapters": [],
       "status": "estimated"
@@ -273,37 +274,49 @@
     {
       "week": 12,
       "date_range": [],
-      "topics": [],
+      "topics": [
+        "8.Firewalls"
+      ],
       "chapters": [],
       "status": "estimated"
     },
     {
       "week": 13,
       "date_range": [],
-      "topics": [],
+      "topics": [
+        "9.Virtual Private Networks"
+      ],
       "chapters": [],
       "status": "estimated"
     },
     {
       "week": 14,
       "date_range": [],
-      "topics": [],
+      "topics": [
+        "10.Encryption"
+      ],
       "chapters": [],
       "status": "estimated"
     },
     {
       "week": 15,
       "date_range": [],
-      "topics": [],
+      "topics": [
+        "11.Intrusion Detection"
+      ],
       "chapters": [],
       "status": "estimated"
     },
     {
       "week": 16,
       "date_range": [],
-      "topics": [],
+      "topics": [
+        "12.Paper Reading and Project Reports"
+      ],
       "chapters": [],
       "status": "estimated"
     }
-  ]
+  ],
+  "created_at": "2026-11-28T10:50:23+00:00",
+  "updated_at": "2026-11-28T10:51:16+00:00"
 }

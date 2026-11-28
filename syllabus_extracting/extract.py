@@ -230,13 +230,14 @@ def model_schema() -> dict:
             "scope": evidence_value({"type": "array", "items": {"type": "string"}}),
             "note": nullable_string},
             "required": ["id", "type", "title", "weight", "date", "scope", "note"], "additionalProperties": False}},
+        "source_topics": {"type": "array", "items": {"type": "string"}},
         "weekly_schedule": {"type": "array", "items": {"type": "object", "properties": {
             "week": {"type": "integer"}, "date_range": {"type": "array", "items": {"type": "string"}},
             "topics": {"type": "array", "items": {"type": "string"}},
             "chapters": {"type": "array", "items": {"type": "string"}},
             "status": {"type": "string", "enum": ["confirmed", "estimated"]}},
             "required": ["week", "date_range", "topics", "chapters", "status"], "additionalProperties": False}},
-    }, "required": ["textbook", "grading", "assessments", "weekly_schedule"], "additionalProperties": False}
+    }, "required": ["textbook", "grading", "assessments", "source_topics", "weekly_schedule"], "additionalProperties": False}
 
 
 def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
@@ -250,7 +251,12 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
               "Confirmed requires an exact source quote in evidence. Estimated requires a clear derivation. "
               "Do not treat general teaching topics as textbook chapter IDs. "
               "If Teaching Weeks states N, return exactly N weekly_schedule entries numbered 1 through N. "
-              "Use stated teaching goals/content to distribute plausible topics in teaching order across those weeks. "
+              "First list the explicitly stated teaching topics in source_topics, copying their wording and order. "
+              "Distribute every source topic across all N weeks in order. Each week must have a nonempty topic. "
+              "Allocate each source topic either floor(N/M) or ceil(N/M) weeks when M topics fit N weeks; you decide which topics receive the extra weeks. "
+              "If one source topic occupies multiple consecutive weeks, label its entries with the original text plus （1）, （2）, etc. "
+              "Do not add review, practice, extensions, or other invented activities. If there are more topics than weeks, group adjacent topics in a week. "
+              "If some weeks are explicitly scheduled, preserve those exact weeks as confirmed and distribute topics only into the missing weeks. "
               "Mark a week confirmed only if the syllabus explicitly assigns its topic to that numbered week; mark every inferred week estimated. "
               "When no confirmed calendar dates are supplied, set every date_range to []. "
               "Do not invent textbook chapter IDs; use chapters:[] when no matching chapter list exists. "
@@ -283,7 +289,7 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
     return json.loads(content)
 
 
-def validate(result: dict, fields: dict) -> None:
+def validate(result: dict, fields: dict, source_topics: list[str] | None = None) -> None:
     required = {"schema_version", "analysis_id", "course_key", "sources", "model", "created_at", "start_date", "end_date", "course", "grading", "assessments", "weekly_schedule"}
     if not required <= result.keys():
         raise ValueError(f"缺少欄位：{sorted(required - result.keys())}")
@@ -317,7 +323,47 @@ def validate(result: dict, fields: dict) -> None:
     if total is not None and numbers != list(range(1, total + 1)):
         raise ValueError(f"weekly_schedule 必須依序包含第 1 至 {total} 週")
     explicit = explicitly_scheduled_weeks(fields)
+    if total is not None and not explicit and source_topics is not None:
+        def topic_parts(value: str) -> tuple[str, int | None]:
+            text = unicodedata.normalize("NFKC", value).strip()
+            match = re.search(r"\s*\(([1-9]\d*)\)$", text)
+            ordinal = int(match.group(1)) if match else None
+            if match:
+                text = text[:match.start()].strip()
+            text = re.sub(r"^\d+[.)]\s*", "", text)
+            return text.casefold(), ordinal
+
+        if not source_topics or len(set(source_topics)) != len(source_topics):
+            raise ValueError("課綱授課主題清單為空或重複")
+        source_text = " ".join(fields.values())
+        if any(topic not in source_text for topic in source_topics):
+            raise ValueError("推估主題清單含課綱原文未列的主題")
+        assignments = []
+        for item in weeks:
+            if not item["topics"]:
+                raise ValueError(f"第 {item['week']} 週沒有主題")
+            indexes = []
+            for topic in item["topics"]:
+                matches = [i for i, source in enumerate(source_topics)
+                           if topic_parts(topic)[0] == topic_parts(source)[0]]
+                if len(matches) != 1:
+                    raise ValueError(f"第 {item['week']} 週主題不在課綱主題清單中：{topic}；清單：{source_topics[:12]}")
+                indexes.append(matches[0])
+            assignments.extend(indexes)
+        if assignments != sorted(assignments) or set(assignments) != set(range(len(source_topics))):
+            raise ValueError("推估主題順序錯誤或漏掉原文主題")
+        counts = [assignments.count(i) for i in range(len(source_topics))]
+        if max(counts) - min(counts) > 1:
+            raise ValueError("推估主題分配不均勻")
+        for index, source in enumerate(source_topics):
+            labels = [topic_parts(topic)[1] for item in weeks for topic in item["topics"]
+                      if topic_parts(topic)[0] == topic_parts(source)[0]]
+            expected = [None] if len(labels) == 1 else list(range(1, len(labels) + 1))
+            if labels != expected:
+                raise ValueError(f"主題 {source} 跨週標號錯誤")
     for item in weeks:
+        if not item["topics"]:
+            raise ValueError(f"第 {item['week']} 週沒有主題")
         if item["week"] < 1 or (total is not None and item["week"] > total):
             raise ValueError(f"週次超出授課範圍：{item['week']}")
         if item["status"] == "confirmed" and item["week"] not in explicit:
@@ -370,7 +416,7 @@ def build_result(semester: str, serial_no: str, model: str, fields: dict,
             result["warnings"] = [str(exc)]
     else:
         result["warnings"] = ["課程查詢結果沒有符合序號的上課時段；sessions 保持空白"]
-    validate(result, fields)
+    validate(result, fields, extracted.get("source_topics"))
     return result
 
 

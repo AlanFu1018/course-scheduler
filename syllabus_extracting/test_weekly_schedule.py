@@ -16,9 +16,9 @@ URL = "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=52016&outlin
 def model_result(count=16, confirmed=()):
     return {
         "textbook": {"title": None, "authors": [], "edition": None, "chapters": []},
-        "grading": [], "assessments": [],
+        "grading": [], "assessments": [], "source_topics": ["網路概論"],
         "weekly_schedule": [
-            {"week": n, "date_range": [], "topics": ["網路概論"], "chapters": [],
+            {"week": n, "date_range": [], "topics": [f"網路概論（{n}）" if count > 1 else "網路概論"], "chapters": [],
              "status": "confirmed" if n in confirmed else "estimated"}
             for n in range(1, count + 1)
         ],
@@ -43,6 +43,37 @@ class WeeklyScheduleTests(unittest.TestCase):
             {"category": name, "weight": {"value": value, "status": "confirmed", "evidence": ""}}
             for name, value in (("作業", 30), ("期末考", 70))]
         self.assertEqual(build(fields, data)["grading"][0]["weight"]["value"], 30)
+
+    def test_eleven_topics_spread_over_sixteen_weeks(self):
+        topics = [f"主題{i}" for i in range(1, 12)]
+        fields = {**FIELDS, "授課內容": "、".join(topics)}
+        data = model_result()
+        data["source_topics"] = topics
+        assigned = []
+        for i, topic in enumerate(topics):
+            assigned.extend([f"{topic}（1）", f"{topic}（2）"] if i < 5 else [topic])
+        for row, topic in zip(data["weekly_schedule"], assigned):
+            row["topics"] = [topic]
+        build(fields, data)
+        data["weekly_schedule"][1]["topics"] = ["複習"]
+        with self.assertRaisesRegex(ValueError, "不在課綱主題清單"):
+            build(fields, data)
+
+    def test_more_topics_than_weeks_group_adjacent(self):
+        fields = {"課號": "CE3007-B", "授課週數": "2", "授課內容": "甲、乙、丙"}
+        data = model_result(2)
+        data["source_topics"] = ["甲", "乙", "丙"]
+        data["weekly_schedule"][0]["topics"] = ["甲", "乙"]
+        data["weekly_schedule"][1]["topics"] = ["丙"]
+        build(fields, data)
+
+    def test_numbered_topic_allows_space_before_part_label(self):
+        fields = {"課號": "IM6055-*", "授課週數": "2", "授課內容": "1.What Is Information Security?"}
+        data = model_result(2)
+        data["source_topics"] = ["1.What Is Information Security?"]
+        data["weekly_schedule"][0]["topics"] = ["1.What Is Information Security? （1）"]
+        data["weekly_schedule"][1]["topics"] = ["1.What Is Information Security?（2）"]
+        build(fields, data)
 
     def test_partial_and_complete_explicit_schedule(self):
         partial = {**FIELDS, "授課進度": "第 2 週：應用層；第 5 週：傳輸層"}

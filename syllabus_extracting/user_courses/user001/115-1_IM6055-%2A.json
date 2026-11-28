@@ -1,0 +1,322 @@
+{
+  "schema_version": "2.0",
+  "user_id": "user001",
+  "course_key": "115-1_IM6055-*",
+  "source": {
+    "analysis_id": "sa_54a997a6285e",
+    "sources": [
+      {
+        "type": "ncu_syllabus",
+        "role": "syllabus",
+        "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?serialNo=43036&outline=43036&semester=1151",
+        "fetched_at": "2026-11-28T18:50:23+08:00",
+        "raw_text_hash": "sha256:13f9e89941b761822250182730fc51f089ec584741658a64c98842f7e5334d13"
+      },
+      {
+        "type": "ncu_course_search",
+        "role": "course_schedule",
+        "url": "https://cis.ncu.edu.tw/Course/main/query/byKeywords?year=115&fall_spring=1&selectDept=&keyword=43036&week=&day=&crs_lang_no=0&query=%E6%9F%A5%E8%A9%A2",
+        "fetched_at": "2026-11-28T18:50:23+08:00",
+        "raw_text_hash": "sha256:b8e0a6a9082665601dfa9d5b979b768ba3bee52f602550566d576ed47c353204"
+      }
+    ]
+  },
+  "start_date": null,
+  "end_date": null,
+  "course": {
+    "code": "IM6055-*",
+    "name": "電腦網路安全",
+    "name_en": "Computer Network Security",
+    "instructor": "陳奕明",
+    "credits": 3,
+    "sessions": [
+      {
+        "weekday": 5,
+        "start_time": "14:00",
+        "end_time": "16:50",
+        "room": "I1-107"
+      }
+    ],
+    "textbook": {
+      "title": "Fundamentals of Network Security",
+      "authors": [
+        "E. Maiwald"
+      ],
+      "edition": null,
+      "chapters": []
+    },
+    "sessions_raw": "Fri678/I1-107"
+  },
+  "grading": [
+    {
+      "category": "作業",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
+      }
+    },
+    {
+      "category": "期中考",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
+      }
+    },
+    {
+      "category": "期末考",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
+      }
+    },
+    {
+      "category": "上課表現",
+      "weight": {
+        "value": 10,
+        "status": "confirmed",
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％ 期中考： 30％ 期末考:： 30％ 上課表現： 10％"
+      }
+    }
+  ],
+  "assessments": [
+    {
+      "id": "作業",
+      "type": "作業",
+      "title": "作業",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "作業：2個作業(含分組報告及思科學院線上課程修課） 30％"
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date provided"
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "No scope provided"
+      },
+      "note": null
+    },
+    {
+      "id": "期中考",
+      "type": "期中考",
+      "title": "期中考",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "期中考： 30％"
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date provided"
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "No scope provided"
+      },
+      "note": null
+    },
+    {
+      "id": "期末考",
+      "type": "期末考",
+      "title": "期末考",
+      "weight": {
+        "value": 30,
+        "status": "confirmed",
+        "evidence": "期末考:： 30％"
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date provided"
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "No scope provided"
+      },
+      "note": null
+    },
+    {
+      "id": "上課表現",
+      "type": "上課表現",
+      "title": "上課表現",
+      "weight": {
+        "value": 10,
+        "status": "confirmed",
+        "evidence": "上課表現： 10％"
+      },
+      "date": {
+        "value": null,
+        "week": null,
+        "status": "estimated",
+        "evidence": "No date provided"
+      },
+      "scope": {
+        "value": [],
+        "status": "estimated",
+        "evidence": "No scope provided"
+      },
+      "note": null
+    }
+  ],
+  "weekly_schedule": [
+    {
+      "week": 1,
+      "date_range": [],
+      "topics": [
+        "1.What Is Information Security? （1）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 2,
+      "date_range": [],
+      "topics": [
+        "1.What Is Information Security? （2）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 3,
+      "date_range": [],
+      "topics": [
+        "2.Types of Attacks （1）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 4,
+      "date_range": [],
+      "topics": [
+        "2.Types of Attacks （2）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 5,
+      "date_range": [],
+      "topics": [
+        "3.Hacker Techniques （1）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 6,
+      "date_range": [],
+      "topics": [
+        "3.Hacker Techniques （2）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 7,
+      "date_range": [],
+      "topics": [
+        "4.Information Security Services （1）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 8,
+      "date_range": [],
+      "topics": [
+        "4.Information Security Services （2）"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 9,
+      "date_range": [],
+      "topics": [
+        "5.Security Policy"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 10,
+      "date_range": [],
+      "topics": [
+        "6.Managing Risk"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 11,
+      "date_range": [],
+      "topics": [
+        "7.Information Security Process"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 12,
+      "date_range": [],
+      "topics": [
+        "8.Firewalls"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 13,
+      "date_range": [],
+      "topics": [
+        "9.Virtual Private Networks"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 14,
+      "date_range": [],
+      "topics": [
+        "10.Encryption"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 15,
+      "date_range": [],
+      "topics": [
+        "11.Intrusion Detection"
+      ],
+      "chapters": [],
+      "status": "estimated"
+    },
+    {
+      "week": 16,
+      "date_range": [],
+      "topics": [
+        "12.Paper Reading and Project Reports py"
+      ],
+      "chapters": [],
+      "status": "user_supplied"
+    }
+  ],
+  "created_at": "2026-11-28T10:51:38+00:00",
+  "updated_at": "2026-11-28T10:51:56+00:00"
+}
