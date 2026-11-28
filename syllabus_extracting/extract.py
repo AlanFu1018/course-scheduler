@@ -19,6 +19,21 @@ from pathlib import Path
 
 BASE = "https://cis.ncu.edu.tw"
 DEFAULT_MODEL = "openai/gpt-oss-20b"
+SCHEMA_VERSION = "2.0"
+MAX_REGENERATIONS = 3
+OUTPUT_DIR = Path(__file__).resolve().parent / "syllabus_analyses"
+PERIOD_ORDER = "1234Z56789ABCD"
+# NCU official timetable: https://pdc.adm.ncu.edu.tw/Course/course/COUR_U.pdf
+PERIOD_TIMES = {
+    "1": ("08:00", "08:50"), "2": ("09:00", "09:50"),
+    "3": ("10:00", "10:50"), "4": ("11:00", "11:50"),
+    "Z": ("12:00", "12:50"), "5": ("13:00", "13:50"),
+    "6": ("14:00", "14:50"), "7": ("15:00", "15:50"),
+    "8": ("16:00", "16:50"), "9": ("17:00", "17:50"),
+    "A": ("18:00", "18:50"), "B": ("19:00", "19:50"),
+    "C": ("20:00", "20:50"), "D": ("21:00", "21:50"),
+}
+WEEKDAYS = {"Mon": 1, "Tue": 2, "Wed": 3, "Thu": 4, "Fri": 5, "Sat": 6, "Sun": 7}
 
 
 class TableParser(HTMLParser):
@@ -32,7 +47,9 @@ class TableParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = dict(attrs)
-        if tag == "tr":
+        if tag == "br" and self.cell is not None:
+            self.cell["text"] += " "
+        elif tag == "tr":
             self.row = []
         elif tag in {"td", "th"} and self.row is not None:
             self.cell = {"text": ""}
@@ -108,7 +125,7 @@ def source_data(semester: str, serial_no: str) -> tuple[dict, dict, str, str]:
         "week": "", "day": "", "crs_lang_no": "0", "query": "查詢",
     })
     search_page = parse_page(fetch(search_url, opener))
-    matching = [row for row in search_page.rows if row and re.search(rf"\b{re.escape(serial_no)}\b", row[0]["text"])]
+    matching = [row for row in search_page.rows if row and row[0]["text"].split()[:1] == [serial_no]]
     search_fields: dict[str, str] = {}
     if matching:
         row = matching[0]
@@ -123,6 +140,59 @@ def source_data(semester: str, serial_no: str) -> tuple[dict, dict, str, str]:
 
 def field_value(fields: dict[str, str], chinese: str, english: str) -> str | None:
     return fields.get(chinese) or fields.get(english)
+
+
+def teaching_weeks(fields: dict[str, str]) -> int | None:
+    raw = field_value(fields, "授課週數", "Teaching Weeks")
+    if not raw:
+        return None
+    match = re.search(r"\d+", raw)
+    if not match:
+        return None
+    count = int(match.group())
+    if count < 1:
+        raise ValueError("授課週數必須大於 0")
+    return count
+
+
+def explicitly_scheduled_weeks(fields: dict[str, str]) -> set[int]:
+    # A total such as "授課週數: 16" is not evidence for week 16 content.
+    content = " ".join(value for key, value in fields.items()
+                       if key not in {"授課週數", "Teaching Weeks"})
+    patterns = (r"第\s*(\d+)\s*週", r"\bweek\s*(\d+)\b", r"\bW(\d+)\b")
+    return {int(match) for pattern in patterns
+            for match in re.findall(pattern, content, flags=re.IGNORECASE)}
+
+
+def parse_sessions(raw: str) -> list[dict]:
+    """Convert NCU period codes to occupied time ranges, including short breaks."""
+    sessions = []
+    for part in re.split(r"\s*[,;；，]\s*", raw.strip()):
+        part = re.sub(r"\s*\([^)]*\)\s*$", "", part).strip()
+        match = re.fullmatch(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun)([1-9ZA-D]+)/([^/]+)", part, re.IGNORECASE)
+        if not match:
+            raise ValueError(f"無法辨識上課時段：{part}")
+        day, codes, room = match.groups()
+        codes = codes.upper()
+        if len(set(codes)) != len(codes) or any(code not in PERIOD_ORDER for code in codes):
+            raise ValueError(f"上課節次重複或未知：{codes}")
+        indexes = [PERIOD_ORDER.index(code) for code in codes]
+        if indexes != sorted(indexes):
+            raise ValueError(f"上課節次順序錯誤：{codes}")
+        room = room.strip()
+        if not room:
+            raise ValueError("缺少上課教室")
+        groups = [[codes[0]]]
+        for previous, code in zip(codes, codes[1:]):
+            if PERIOD_ORDER.index(code) == PERIOD_ORDER.index(previous) + 1:
+                groups[-1].append(code)
+            else:
+                groups.append([code])
+        for group in groups:
+            sessions.append({"weekday": WEEKDAYS[day.title()],
+                             "start_time": PERIOD_TIMES[group[0]][0],
+                             "end_time": PERIOD_TIMES[group[-1]][1], "room": room})
+    return sessions
 
 
 def model_schema() -> dict:
@@ -161,22 +231,31 @@ def model_schema() -> dict:
     }, "required": ["textbook", "grading", "assessments", "weekly_schedule"], "additionalProperties": False}
 
 
-def call_groq(fields: dict, search_fields: dict, api_key: str, model: str) -> dict:
+def call_groq(fields: dict, search_fields: dict, api_key: str, model: str,
+              feedback: str | None = None) -> dict:
     if not api_key:
         raise ValueError("請提供 Groq API key，或設定 GROQ_API_KEY 環境變數")
-    system = ("Extract only facts grounded in the supplied NCU syllabus. Return JSON matching the schema. "
-              "Never invent dates, weeks, chapters, weights, or textbook authors. For missing values use null or []. "
+    system = ("Extract syllabus facts and create a clearly estimated weekly study-planning outline. Return JSON matching the schema. "
+              "Never invent calendar dates, grading weights, textbook chapters, assessments, or textbook authors. For missing values use null or []. "
               "For date objects with no date, use value:null, week:null, status:estimated, evidence explaining absence. "
               "Keep combined grading categories combined (e.g. HWs+mini-tests 30%); do not split them. "
               "Confirmed requires an exact source quote in evidence. Estimated requires a clear derivation. "
               "Do not treat general teaching topics as textbook chapter IDs. "
-              "Only include weekly schedule entries if the syllabus explicitly specifies week-by-week content. "
+              "If Teaching Weeks states N, return exactly N weekly_schedule entries numbered 1 through N. "
+              "Use stated teaching goals/content to distribute plausible topics in teaching order across those weeks. "
+              "Mark a week confirmed only if the syllabus explicitly assigns its topic to that numbered week; mark every inferred week estimated. "
+              "When no confirmed calendar dates are supplied, set every date_range to []. "
+              "Do not invent textbook chapter IDs; use chapters:[] when no matching chapter list exists. "
+              "If Teaching Weeks is missing, include only explicitly numbered weeks, with no invented total. "
               "Only include assessments explicitly mentioned. Output JSON only.")
     body = {"model": model, "temperature": 0, "messages": [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps({"syllabus_fields": fields, "search_result": search_fields}, ensure_ascii=False)},
     ], "response_format": {"type": "json_schema", "json_schema": {
         "name": "syllabus_extraction", "strict": True, "schema": model_schema()}}}
+    if feedback:
+        body["messages"].append({"role": "user", "content":
+            f"The previous generation failed validation: {feedback}. Regenerate the complete JSON using only the supplied source."})
     try:
         from groq import Groq, APIStatusError
     except ImportError as exc:
@@ -187,10 +266,12 @@ def call_groq(fields: dict, search_fields: dict, api_key: str, model: str) -> di
         detail = str(exc)
         if exc.status_code == 403 and "1010" in detail:
             raise RuntimeError("Groq 的 Cloudflare 拒絕了此程式連線（403／1010）。已改用 Groq 官方 Python 套件；若仍出現此錯誤，請聯絡 Groq 支援並提供錯誤代碼。") from exc
+        if exc.status_code == 400 and "Generated JSON does not match" in detail:
+            raise ValueError("Groq 回傳的 JSON 不符合要求格式") from exc
         raise RuntimeError(f"Groq HTTP {exc.status_code}: {detail[:600]}") from exc
     content = response.choices[0].message.content
     if not content:
-        raise RuntimeError("Groq 沒有回傳 JSON 內容")
+        raise ValueError("Groq 沒有回傳 JSON 內容")
     return json.loads(content)
 
 
@@ -219,15 +300,41 @@ def validate(result: dict, fields: dict) -> None:
     for item in result["assessments"]:
         if not set(item["scope"]["value"]) <= chapter_ids:
             raise ValueError(f"評量 {item['id']} 引用不存在的章節")
+    weeks = result["weekly_schedule"]
+    total = teaching_weeks(fields)
+    numbers = [item["week"] for item in weeks]
+    if len(set(numbers)) != len(numbers):
+        raise ValueError("weekly_schedule 的週次重複")
+    if total is not None and numbers != list(range(1, total + 1)):
+        raise ValueError(f"weekly_schedule 必須依序包含第 1 至 {total} 週")
+    explicit = explicitly_scheduled_weeks(fields)
+    for item in weeks:
+        if item["week"] < 1 or (total is not None and item["week"] > total):
+            raise ValueError(f"週次超出授課範圍：{item['week']}")
+        if item["status"] == "confirmed" and item["week"] not in explicit:
+            raise ValueError(f"第 {item['week']} 週未在課綱明載，不可標為 confirmed")
+        if item["week"] in explicit and item["status"] != "confirmed":
+            raise ValueError(f"第 {item['week']} 週已在課綱明載，應標為 confirmed")
+        if total is None and item["week"] not in explicit:
+            raise ValueError(f"未提供授課週數，不可推估第 {item['week']} 週")
+        if result["start_date"] is None and item["date_range"]:
+            raise ValueError(f"第 {item['week']} 週沒有可靠日期，date_range 應為空陣列")
+        if not set(item["chapters"]) <= chapter_ids:
+            raise ValueError(f"第 {item['week']} 週引用不存在的教材章節")
 
 
-def extract(semester: str, serial_no: str, output: Path, api_key: str, model: str = DEFAULT_MODEL) -> Path:
-    fields, search_fields, url, search_url = source_data(semester, serial_no)
-    extracted = call_groq(fields, search_fields, api_key, model)
+def build_result(semester: str, serial_no: str, model: str, fields: dict,
+                 search_fields: dict, url: str, search_url: str, extracted: dict) -> dict:
+    if not isinstance(extracted, dict):
+        raise ValueError("Groq 回傳的資料不是 JSON 物件")
+    expected = {"textbook": dict, "grading": list, "assessments": list, "weekly_schedule": list}
+    for name, kind in expected.items():
+        if not isinstance(extracted.get(name), kind):
+            raise ValueError(f"Groq 回傳欄位 {name} 缺失或類型錯誤")
     now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
     code = field_value(fields, "課號", "Course Code") or ""
     result = {
-        "schema_version": "1.5", "analysis_id": "sa_" + hashlib.sha256((url + json.dumps(fields, ensure_ascii=False, sort_keys=True)).encode()).hexdigest()[:12],
+        "schema_version": SCHEMA_VERSION, "analysis_id": "sa_" + hashlib.sha256((url + json.dumps(fields, ensure_ascii=False, sort_keys=True)).encode()).hexdigest()[:12],
         "course_key": f"{semester[:3]}-{semester[3]}_{code}",
         "sources": [
             {"type": "ncu_syllabus", "role": "syllabus", "url": url, "fetched_at": now,
@@ -247,18 +354,40 @@ def extract(semester: str, serial_no: str, output: Path, api_key: str, model: st
     }
     session = search_fields.get("session", "")
     if session:
-        result["course"]["sessions_raw"] = session  # Class sections need a verified time mapping.
+        result["course"]["sessions_raw"] = session
+        try:
+            result["course"]["sessions"] = parse_sessions(session)
+        except ValueError as exc:
+            result["warnings"] = [str(exc)]
+    else:
+        result["warnings"] = ["課程查詢結果沒有符合序號的上課時段；sessions 保持空白"]
     validate(result, fields)
+    return result
+
+
+def extract(semester: str, serial_no: str, api_key: str, model: str = DEFAULT_MODEL) -> Path:
+    fields, search_fields, url, search_url = source_data(semester, serial_no)
+    feedback = None
+    for attempt in range(MAX_REGENERATIONS + 1):
+        try:
+            extracted = call_groq(fields, search_fields, api_key, model, feedback)
+            result = build_result(semester, serial_no, model, fields, search_fields,
+                                  url, search_url, extracted)
+            break
+        except (ValueError, TypeError, KeyError) as exc:
+            if attempt == MAX_REGENERATIONS:
+                raise RuntimeError(f"Groq 回傳格式經 {MAX_REGENERATIONS + 1} 次生成仍無法通過驗證：{exc}") from exc
+            feedback = str(exc)[:300]
+    output = OUTPUT_DIR / f"{semester}_{serial_no}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出 syllabus_analysis.json")
+    parser = argparse.ArgumentParser(description="擷取中央大學課綱並輸出至 syllabus_analyses/{學期}_{課程序號}.json")
     parser.add_argument("--semester", default="1151")
     parser.add_argument("--serial-no", default="52016")
-    parser.add_argument("--output", type=Path, default=Path("syllabus_analysis.json"))
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--gui", action="store_true")
     args = parser.parse_args()
@@ -267,7 +396,10 @@ def main() -> None:
         launch()
         return
     try:
-        print(extract(args.semester, args.serial_no, args.output, os.getenv("GROQ_API_KEY", ""), args.model))
+        output = extract(args.semester, args.serial_no, os.getenv("GROQ_API_KEY", ""), args.model)
+        print(output)
+        for warning in json.loads(output.read_text(encoding="utf-8")).get("warnings", []):
+            print(f"提醒：{warning}", file=sys.stderr)
     except Exception as exc:
         print(f"擷取失敗：{exc}", file=sys.stderr)
         raise SystemExit(1) from exc

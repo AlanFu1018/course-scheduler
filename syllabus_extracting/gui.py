@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import json
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 from extract import DEFAULT_MODEL, extract
 
@@ -14,32 +15,27 @@ from extract import DEFAULT_MODEL, extract
 def launch() -> None:
     root = tk.Tk()
     root.title("中央大學課綱擷取")
-    root.geometry("580x290")
+    root.geometry("580x250")
     root.columnconfigure(1, weight=1)
 
     semester = tk.StringVar(value="1151")
     serial_no = tk.StringVar(value="52016")
     model = tk.StringVar(value=DEFAULT_MODEL)
     key = tk.StringVar(value=os.getenv("GROQ_API_KEY", ""))
-    output = tk.StringVar(value=str(Path.cwd() / "syllabus_analysis.json"))
     status = tk.StringVar(value="請輸入課程資料後按「擷取」。")
 
     for row, (label, variable) in enumerate([
         ("學期", semester), ("課程序號", serial_no), ("Groq 模型", model),
-        ("Groq API key", key), ("輸出檔案", output),
+        ("Groq API key", key),
     ]):
         ttk.Label(root, text=label).grid(row=row, column=0, sticky="w", padx=12, pady=7)
         entry = ttk.Entry(root, textvariable=variable, show="*" if label == "Groq API key" else "")
         entry.grid(row=row, column=1, sticky="ew", padx=8, pady=7)
-        if label == "輸出檔案":
-            ttk.Button(root, text="選擇…", command=lambda: output.set(filedialog.asksaveasfilename(
-                defaultextension=".json", filetypes=[("JSON", "*.json")],
-                initialfile="syllabus_analysis.json") or output.get())).grid(row=row, column=2, padx=10)
 
     def run() -> None:
         button.configure(state="disabled")
         status.set("正在抓取課綱並呼叫 Groq…")
-        values = (semester.get().strip(), serial_no.get().strip(), Path(output.get().strip()), key.get().strip(), model.get().strip())
+        values = (semester.get().strip(), serial_no.get().strip(), key.get().strip(), model.get().strip())
 
         def worker() -> None:
             try:
@@ -58,12 +54,16 @@ def launch() -> None:
 
     def finish_success(path: str) -> None:
         button.configure(state="normal")
-        status.set(f"已儲存：{path}")
-        messagebox.showinfo("完成", f"已產生\n{path}")
+        warnings = json.loads(Path(path).read_text(encoding="utf-8")).get("warnings", [])
+        status.set(f"已儲存：{path}" + ("（上課時段需檢查）" if warnings else ""))
+        message = f"已產生\n{path}"
+        if warnings:
+            message += "\n\n提醒：" + "；".join(warnings)
+        messagebox.showinfo("完成", message)
 
     button = ttk.Button(root, text="擷取並產生 JSON", command=run)
-    button.grid(row=5, column=1, sticky="e", padx=8, pady=12)
-    ttk.Label(root, textvariable=status, wraplength=540).grid(row=6, column=0, columnspan=3, sticky="w", padx=12)
+    button.grid(row=4, column=1, sticky="e", padx=8, pady=12)
+    ttk.Label(root, textvariable=status, wraplength=540).grid(row=5, column=0, columnspan=2, sticky="w", padx=12)
     root.mainloop()
 
 
